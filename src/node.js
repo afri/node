@@ -224,7 +224,9 @@ var module = (function () {
       // REPL is a special case, because it needs the real require.
       if (id == 'repl') {
         var replModule = new Module("repl");
-        replModule._compile(natives.repl, 'repl.js');
+        // stratified it:
+        var replSrc = global.__oni_rt.c1.compile(natives.repl, {filename:'repl.js'});
+        replModule._compile(replSrc, 'repl.js');
         internalModuleCache.repl = replModule;
         return replModule.exports;
       }
@@ -568,6 +570,17 @@ global.console.assert = function(expression){
 
 global.Buffer = requireNative('buffer').Buffer;
 
+// global StratifiedJS runtime
+global.__oni_rt = requireNative('__oni_rt');
+
+// stratified eval:
+// XXX scope is wrong
+global.$eval = function(code, filename) {
+  filename = filename || "'$eval code'";
+  var js = global.__oni_rt.c1.compile(code, {filename:filename});
+  return global.eval(js);
+};
+  
 process.exit = function (code) {
   process.emit("exit", code || 0);
   process.reallyExit(code || 0);

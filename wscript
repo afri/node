@@ -528,7 +528,7 @@ def build(bld):
     js2c.JS2C(source, targets)
 
   native_cc = bld.new_task_gen(
-    source='src/node.js ' + bld.path.ant_glob('lib/*.js'),
+    source='stratified/rt/__oni_rt.js ' + 'src/node.js ' + bld.path.ant_glob('lib/*.js'),
     target="src/node_natives.h",
     before="cxx",
     install_path=None
