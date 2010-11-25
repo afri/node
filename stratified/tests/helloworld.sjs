@@ -9,7 +9,9 @@ function forever_greet() {
   }
   and {
     while (1) {
+      try {
       require('./helloworld-module').delayedLog("  stratified world!");
+      }catch(e) { console.log("oops: "+e); hold(1000); }
     }
   }
 }

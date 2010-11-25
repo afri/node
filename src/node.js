@@ -343,10 +343,16 @@ var module = (function () {
   // Native extension for .js
   extensions['.js'] = function (module, filename) {
     var content = requireNative('fs').readFileSync(filename, 'utf8');
+    module._compile(content, filename);
+  };
+
+  // StratifiedJS code
+  extensions['.sjs'] = function (module, filename) {
+    var content = requireNative('fs').readFileSync(filename, 'utf8');
     module._compile(global.__oni_rt.c1.compile(content, {filename:filename}),
                     filename);
   };
-
+  
 
   // Native extension for .node
   extensions['.node'] = function (module, filename) {
