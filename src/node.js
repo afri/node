@@ -78,9 +78,10 @@ var natives = process.binding('natives');
 function requireNative (id) {
   if (internalModuleCache[id]) return internalModuleCache[id].exports;
   if (!natives[id]) throw new Error('No such native module ' + id);
-
+  // special case for __$ files (treat as SJS):
+  var src = (id[2] == "$" ? global.__oni_rt.c1.compile(natives[id], { filename: id+'.js' }) : natives[id]);
   var fn = evals.Script.runInThisContext(
-    "(function (module, exports, require) {" + natives[id] + "\n})",
+    "(function (module, exports, require) {" + src + "\n})",
     id + '.js');
   var m = {id: id, exports: {}};
   fn(m, m.exports, requireNative);
@@ -240,8 +241,7 @@ var module = (function () {
 
     var module = new Module(id, parent);
     moduleCache[filename] = module;
-    module.load(filename);
-    return module.exports;
+    return module.load(filename);
   };
   
   function resolveModuleFilename (request, parent) {
@@ -259,6 +259,8 @@ var module = (function () {
     return [id, filename];
   }
 
+/*
+  Will be swapped out below for an SJS function taken from __$oni_rt.js
 
   Module.prototype.load = function (filename) {
     debug("load " + JSON.stringify(filename) + " for module " + JSON.stringify(this.id));
@@ -271,10 +273,10 @@ var module = (function () {
     extensions[extension](this, filename);
     this.loaded = true;
   };
-
+*/
 
   // Returns exception if any
-  Module.prototype._compile = function (content, filename) {
+  Module.prototype._compile = function (content, filename, sjs) {
     var self = this;
     // remove shebang
     content = content.replace(/^\#\!.*/, '');
@@ -297,6 +299,9 @@ var module = (function () {
     var dirname = path.dirname(filename);
 
     if (contextLoad) {
+      if (sjs)
+        content = __oni_rt.c1.compile(content, {filename:filename});
+      
       if (self.id !== ".") {
         debug('load submodule');
         // not root module
@@ -330,15 +335,16 @@ var module = (function () {
       var wrapper = "(function (exports, require, module, __filename, __dirname) { "
                   + content
                   + "\n});";
-
+      if (sjs)
+        wrapper = __oni_rt.c1.compile(wrapper, {filename:filename});
       var compiledWrapper = evals.Script.runInThisContext(wrapper, filename);
       if (filename === process.argv[1] && global.v8debug) {
         global.v8debug.Debug.setBreakPoint(compiledWrapper, 0, 0);
       }
+      // the 'return' is important here for sequencing SJS:
       return compiledWrapper.apply(self.exports, [self.exports, require, self, filename, dirname]);
     }
   };
-
 
   // Native extension for .js
   extensions['.js'] = function (module, filename) {
@@ -346,13 +352,30 @@ var module = (function () {
     module._compile(content, filename);
   };
 
-  // StratifiedJS code
-  extensions['.sjs'] = function (module, filename) {
-    var content = requireNative('fs').readFileSync(filename, 'utf8');
-    module._compile(global.__oni_rt.c1.compile(content, {filename:filename}),
-                    filename);
-  };
+  //----------------------------------------------------------------------
+  // StratifiedJS bootstrapping
+
+  // global StratifiedJS runtime
+  global.__oni_rt = requireNative('__oni_rt');
+
+  var SJS = requireNative('__$oni_rt');
+  SJS.env.extensions = extensions;
+  SJS.env.process = process;
+  SJS.env.path = path;
+  SJS.env.requireNative = requireNative;
+  extensions['.sjs'] = SJS.sjs_load;
+  Module.prototype.load = SJS.module_load;
+  Module.prototype.process_eval = SJS.process_eval;
   
+  // stratified eval:
+  // XXX scope is wrong
+  global.$eval = function(code, filename) {
+    filename = filename || "'$eval code'";
+    var js = global.__oni_rt.c1.compile(code, {filename:filename});
+    return global.eval(js);
+  };
+
+  //----------------------------------------------------------------------
 
   // Native extension for .node
   extensions['.node'] = function (module, filename) {
@@ -576,17 +599,6 @@ global.console.assert = function(expression){
 };
 
 global.Buffer = requireNative('buffer').Buffer;
-
-// global StratifiedJS runtime
-global.__oni_rt = requireNative('__oni_rt');
-
-// stratified eval:
-// XXX scope is wrong
-global.$eval = function(code, filename) {
-  filename = filename || "'$eval code'";
-  var js = global.__oni_rt.c1.compile(code, {filename:filename});
-  return global.eval(js);
-};
   
 process.exit = function (code) {
   process.emit("exit", code || 0);
@@ -619,8 +631,7 @@ if (process.argv[1]) {
 
 } else if (process._eval) {
   // -e, --eval
-  var rv = new module.Module()._compile('return eval(process._eval)', 'eval');
-  console.log(rv);
+  (new module.Module()).process_eval();
 } else {
   // REPL
   module.requireRepl().start();
