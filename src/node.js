@@ -78,8 +78,9 @@ var natives = process.binding('natives');
 function requireNative (id) {
   if (internalModuleCache[id]) return internalModuleCache[id].exports;
   if (!natives[id]) throw new Error('No such native module ' + id);
-  // special case for __$ files (treat as SJS):
-  var src = (id[2] == "$" ? global.__oni_rt.c1.compile(natives[id], { filename: id+'.js' }) : natives[id]);
+  // special case for $*, __$* files (treat as SJS):
+  // XXX fix the buildsystem, so that we can give these sjs extensions
+  var src = ((id[0] == "$" || id[2] == "$") ? global.__oni_rt.c1.compile(natives[id], { filename: id+'.js' }) : natives[id]);
   var fn = evals.Script.runInThisContext(
     "(function (module, exports, require) {" + src + "\n})",
     id + '.js');
