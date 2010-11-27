@@ -354,36 +354,14 @@ var module = (function () {
   };
 
   //----------------------------------------------------------------------
-  // StratifiedJS bootstrapping
-
-  // global StratifiedJS runtime
-  global.__oni_rt = requireNative('__oni_rt');
-
-  var SJS = requireNative('__$oni_rt');
-  SJS.env.extensions = extensions;
-  SJS.env.process = process;
-  SJS.env.path = path;
-  SJS.env.requireNative = requireNative;
-  extensions['.sjs'] = SJS.sjs_load;
-  Module.prototype.load = SJS.module_load;
-  Module.prototype.process_eval = SJS.process_eval;
-  
-  // stratified eval:
-  // XXX scope is wrong
-  global.$eval = function(code, filename) {
-    filename = filename || "'$eval code'";
-    var js = global.__oni_rt.c1.compile(code, {filename:filename});
-    return global.eval(js);
-  };
-
-  //----------------------------------------------------------------------
 
   // Native extension for .node
   extensions['.node'] = function (module, filename) {
     process.dlopen(filename, module.exports);
   };
 
-
+  exports.extensions = extensions;
+  
   // bootstrap main module.
   exports.runMain = function () {
     // Load the main module--the command line argument.
@@ -409,6 +387,28 @@ var module = (function () {
   return exports;
 })();
 
+  //----------------------------------------------------------------------
+  // StratifiedJS bootstrapping
+
+  // global StratifiedJS runtime
+  global.__oni_rt = requireNative('__oni_rt');
+
+  var SJS = requireNative('__$oni_rt');
+  SJS.env.extensions = module.extensions;
+  SJS.env.process = process;
+  SJS.env.path = requireNative('path');
+  SJS.env.requireNative = requireNative;
+  module.extensions['.sjs'] = SJS.sjs_load;
+  module.Module.prototype.load = SJS.module_load;
+  module.Module.prototype.process_eval = SJS.process_eval;
+  
+  // stratified eval:
+  // XXX scope is wrong
+  global.$eval = function(code, filename) {
+    filename = filename || "'$eval code'";
+    var js = global.__oni_rt.c1.compile(code, {filename:filename});
+    return global.eval(js);
+  };
 
 // Load events module in order to access prototype elements on process like
 // process.addListener.
