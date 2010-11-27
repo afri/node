@@ -87,7 +87,19 @@ exports.close = function(fd) {
 };
 
 exports.open = function(path, flags, mode) {
-  waitfor (var err, fd) { fs.open(path, flags, mode, resume); }
+  var retracted = false;
+  waitfor (var err, fd) {
+    fs.open(path, flags, mode,
+            function(_err, _fd) {
+              if (!retracted)
+                resume(_err, _fd);
+              else
+                fs.close(_fd);
+            });
+  }
+  retract {
+    retracted = true;
+  }
   if (err) throw err;
   return fd;
 };
@@ -101,6 +113,7 @@ exports.write = function(fd, buffer, offset, length, position) {
 };
 
 exports.read = function(fd, buffer, offset, length, position) {
+  if (position === undefined) position = null;
   waitfor (var err, bytesRead) {
     fs.read(fd, buffer, offset, length, position, resume);
   }
@@ -144,4 +157,48 @@ exports.waitforChange = function(filename, interval /*=0*/) {
   
   return { curr: curr, prev: prev }; 
 }; 
+
+//----------------------------------------------------------------------
+// File Input Streams
+
+exports.openInStream = function(path, flags /*='r'*/, mode /*=0666*/) {
+  var fd = exports.open(path, flags || 'r', mode || 0666);
+  return new InStream(fd);
+};
+
+function InStream(fd) {
+  this.fd = fd;
+  this.buffer = new Buffer(4*1024);
+  this.start = 0;
+  this.l = 0;
+  this.rp = 0;
+}
+InStream.prototype = {
+  close : function() { delete this.buffer; exports.close(this.fd); },
+  __finally__ : function() { this.close(); },
+  
+  read : function(buf, min /*=0*/, max /*=buf.length*/, offset /*=0*/) {
+    min = min || 0;
+    max = max || buf.length;
+    offset = offset || 0;
+    var bytesRead = 0;
+    do {
+      if (!this.l) {
+        // get some more data
+        this.l = exports.read(this.fd, this.buffer, 0, this.buffer.length, this.rp);
+        this.rp += this.l;
+        this.start = 0;
+        if (this.l < min-bytesRead)
+          throw "End of stream";
+      }
+      var b = Math.min(this.l, max-bytesRead);
+      this.buffer.copy(buf, offset, this.start, this.start+b);
+      bytesRead += b;
+      this.start += b;
+      this.l -= b;
+      offset += b;
+    } while (bytesRead < min);
+    return bytesRead;
+  }
+};
 
