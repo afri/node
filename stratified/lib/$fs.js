@@ -168,14 +168,25 @@ exports.openInStream = function(path, flags /*='r'*/, mode /*=0666*/) {
 
 function InStream(fd) {
   this.fd = fd;
-  this.buffer = new Buffer(4*1024);
-  this.start = 0;
-  this.l = 0;
-  this.rp = 0;
+  this.ip = 0;
+
+  // read buffer vars; there are part of the 'Stream' interface:
+  this.rbuffer = new Buffer(4*1024);
+  this.rstart = 0; // offset into readbuffer
+  this.rl = 0; // bytes available in readbuffer
 }
 InStream.prototype = {
-  close : function() { delete this.buffer; exports.close(this.fd); },
+  close : function() { delete this.rbuffer; exports.close(this.fd); },
   __finally__ : function() { this.close(); },
+
+  feed : function() {
+    if (!this.rl) {
+      // get some more data
+      this.rl = exports.read(this.fd, this.rbuffer, 0, this.rbuffer.length, this.ip);
+      this.ip += this.rl;
+      this.rstart = 0;
+    }
+  },
   
   read : function(buf, min /*=0*/, max /*=buf.length*/, offset /*=0*/) {
     min = min || 0;
@@ -183,19 +194,14 @@ InStream.prototype = {
     offset = offset || 0;
     var bytesRead = 0;
     do {
-      if (!this.l) {
-        // get some more data
-        this.l = exports.read(this.fd, this.buffer, 0, this.buffer.length, this.rp);
-        this.rp += this.l;
-        this.start = 0;
-        if (this.l < min-bytesRead)
-          throw "End of stream";
-      }
-      var b = Math.min(this.l, max-bytesRead);
-      this.buffer.copy(buf, offset, this.start, this.start+b);
+      this.feed();
+      if (!this.rl && bytesRead < min)
+        throw "End of stream";
+      var b = Math.min(this.rl, max-bytesRead);
+      this.rbuffer.copy(buf, offset, this.rstart, this.rstart+b);
       bytesRead += b;
-      this.start += b;
-      this.l -= b;
+      this.rstart += b;
+      this.rl -= b;
       offset += b;
     } while (bytesRead < min);
     return bytesRead;
