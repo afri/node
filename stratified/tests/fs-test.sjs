@@ -1,29 +1,42 @@
 var fs = require('$fs');
 
-streamFile('./testfiles/utf8-doubles.txt');
-streamFile('./testfiles/utf8-triples.txt');
-streamFile('./testfiles/utf8-quads.txt');
+streamRawFile('./testfiles/utf8-doubles.txt');
+streamUtf8File('./testfiles/utf8-doubles.txt');
 
-function streamFile(f) {
+streamRawFile('./testfiles/utf8-triples.txt');
+streamUtf8File('./testfiles/utf8-triples.txt');
+
+streamRawFile('./testfiles/utf8-quads.txt');
+streamUtf8File('./testfiles/utf8-quads.txt');
+
+function streamRawFile(f) {
   using(var stream = fs.openInStream(f)) {
-    // pick buffer size to be a prime>3, so that we hit the decoder
-    // boundary for multi-byte sequences:
     var b = new Buffer(7);
-    var str = "";
     var bytesRead = 0;
     var bytes = "";
     var r;
     while ((r = stream.read(b))) {
       for (var i=0; i<r; ++i)
         bytes += b[i] + " ";
-      str += b.toString('utf8',0,r);
       bytesRead += r;
     }
   }
   console.log(f);
   console.log("Bytes: "+bytesRead);
-  console.log("Chars: "+str.length);
   console.log("Raw:\n"+bytes);
+  console.log("-------------------------");
+}
+
+function streamUtf8File(f) {
+  using(var stream = fs.openInStream(f)) {
+    var str = "";
+    var reader = require('$stream').createStreamReader(stream);
+    var r;
+    while ((r = reader.read()).length)
+      str += r;
+  }
+  console.log(f);
+  console.log("Chars: "+str.length);
   console.log("Utf8:\n"+str);
   console.log("-------------------------");
 }

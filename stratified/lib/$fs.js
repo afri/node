@@ -170,7 +170,7 @@ function InStream(fd) {
   this.fd = fd;
   this.ip = 0;
 
-  // read buffer vars; there are part of the 'Stream' interface:
+  // read-buffer vars; they form part of our InStream 'interface':
   this.rbuffer = new Buffer(4*1024);
   this.rstart = 0; // offset into readbuffer
   this.rl = 0; // bytes available in readbuffer
@@ -186,6 +186,7 @@ InStream.prototype = {
       this.ip += this.rl;
       this.rstart = 0;
     }
+    return this.rl;
   },
   
   read : function(buf, min /*=0*/, max /*=buf.length*/, offset /*=0*/) {
@@ -194,8 +195,7 @@ InStream.prototype = {
     offset = offset || 0;
     var bytesRead = 0;
     do {
-      this.feed();
-      if (!this.rl && bytesRead < min)
+      if (!this.feed() && bytesRead < min)
         throw "End of stream";
       var b = Math.min(this.rl, max-bytesRead);
       this.rbuffer.copy(buf, offset, this.rstart, this.rstart+b);
