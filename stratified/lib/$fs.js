@@ -3,7 +3,14 @@
 // Note that for build-technical reasons this lib has a '*.js'
 // extension, whereas it should have a *.sjs one.
 
+//----------------------------------------------------------------------
+// imports
+
 var fs = require('fs');
+var common = require('common');
+var stream = require('$stream');
+
+//----------------------------------------------------------------------
 
 exports.rename = function(path1, path2) {
   waitfor (var err) { fs.rename(path1, path2, resume); }
@@ -163,48 +170,22 @@ exports.waitforChange = function(filename, interval /*=0*/) {
 
 exports.openInStream = function(path, flags /*='r'*/, mode /*=0666*/) {
   var fd = exports.open(path, flags || 'r', mode || 0666);
-  return new InStream(fd);
+  return new FileInStream(fd);
 };
 
-function InStream(fd) {
+function FileInStream(fd) {
   this.fd = fd;
   this.ip = 0;
-
-  // read-buffer vars; they form part of our InStream 'interface':
-  this.rbuffer = new Buffer(4*1024);
-  this.rstart = 0; // offset into readbuffer
-  this.rl = 0; // bytes available in readbuffer
 }
-InStream.prototype = {
+FileInStream.prototype = {
   close : function() { delete this.rbuffer; exports.close(this.fd); },
   __finally__ : function() { this.close(); },
 
-  feed : function() {
-    if (!this.rl) {
-      // get some more data
-      this.rl = exports.read(this.fd, this.rbuffer, 0, this.rbuffer.length, this.ip);
-      this.ip += this.rl;
-      this.rstart = 0;
-    }
-    return this.rl;
-  },
-  
-  read : function(buf, min /*=0*/, max /*=buf.length*/, offset /*=0*/) {
-    min = min || 0;
-    max = max || buf.length;
-    offset = offset || 0;
-    var bytesRead = 0;
-    do {
-      if (!this.feed() && bytesRead < min)
-        throw "End of stream";
-      var b = Math.min(this.rl, max-bytesRead);
-      this.rbuffer.copy(buf, offset, this.rstart, this.rstart+b);
-      bytesRead += b;
-      this.rstart += b;
-      this.rl -= b;
-      offset += b;
-    } while (bytesRead < min);
+  readRaw : function(buf) {
+    var bytesRead = exports.read(this.fd, buf, 0, buf.length, this.ip);
+    if (bytesRead < 0) throw "Read error"; // XXX errno
+    this.ip += bytesRead;
     return bytesRead;
   }
 };
-
+common.copyProps(stream.InStreamProto, FileInStream.prototype);
