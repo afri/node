@@ -19,13 +19,12 @@ var b4bufs = new FreeList('b4buf', 10,
 var iobufs = new FreeList('iobuf', 500,
                           function() { return new Buffer(4*1024); });
 
-
 //----------------------------------------------------------------------
 // InStream prototype
 
 exports.InStreamProto = {
   // To be provided by subclass:
-  // readRaw : read new data into buffer; return bytes read (0==eof)
+  // readRaw(buf) : read new data into buffer; return bytes read (0==eof)
   
   // temporary buffering structures:
   // rbuffer : readbuffer, buffer if rl>0
@@ -207,7 +206,63 @@ exports.InStreamProto = {
         this.rbuffer = null;
       }      
     }
+  },
+
+  writeTo : function(stream) {
+    var bytesCopied = 0;
+    try { 
+      do {
+        if (!this.rl) {
+          if (!this.rbuffer)
+            this.rbuffer = iobufs.alloc();
+          this.rl = this.readRaw(this.rbuffer);
+          if (!this.rl) break; // eof
+          this.rstart = 0;
+        }
+        stream.writeBuf(this.rbuffer, this.rstart, this.rl);
+        bytesCopied += this.rl;
+        this.rl=0;
+      } while (true);
+      return bytesCopied;
+    }
+    finally {
+      if (!this.rl && this.rbuffer) {
+        iobufs.free(this.rbuffer);
+        delete this.rbuffer;
+      }
+    }
   }
 };
 
+//----------------------------------------------------------------------
+// OutStream prototype
 
+exports.OutStreamProto = {
+  // To be provided by subclass:
+  // writeRaw(buf, off, len) : write out buffer; return bytes written
+
+  writeBuf : function(buf, off /*=0*/, len /*=buf.length*/) {
+    off = off || 0;
+    len = len || buf.length;
+    while (len > 0) {
+      var written = this.writeRaw(buf, off, len);
+      // XXX do we need to handle 'written==0' ?
+      off += written;
+      len -= written;
+    }
+  },
+
+  writeOctets : function(data) {
+    // XXX rewrite in terms of IO buffers
+    var buf = new Buffer(data, 'binary');
+    this.writeBuf(buf);
+  },
+
+  writeUtf8 : function(data) {
+    // XXX rewrite in terms of IO buffers
+    var buf = new Buffer(data, 'utf8');
+    this.writeBuf(buf);
+  }
+};
+
+//----------------------------------------------------------------------

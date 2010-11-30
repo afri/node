@@ -57,7 +57,8 @@ exports.createConnection = function (/* port,[host] | path */) {
   if (port === false)
     type = 'unix';
   else
-    type = ((arguments[1] = require('$dns').lookup(arguments[1])).family == 4 ? 'tcp4' : 'tcp6');
+    type = ((arguments[1] = require('$dns').lookup(arguments[1])).family == 4 ?
+            'tcp4' : 'tcp6');
   
   var fd = socket(type);
   try {
@@ -96,19 +97,13 @@ Connection.prototype = {
       throw errnoException(socketError(fd), 'read');
     return bytesRead;
   },
-  write : function(data, encoding) {
-    var buf = (typeof data == 'string' ? new Buffer(data, encoding) : data);
-    var len = buf.length;
-    var off = 0;
-    while (len > 0) {
-      waitforFd(this.fd, false, true);
-      var written = write(this.fd, buf, off, len);
-      if (written <= 0) // XXX <= or < ? what happens in the '==' case?
-        throw errnoException(socketError(fd), 'write');
-      off += written;
-      len -= written;
-    }
-    return off;
+  writeRaw : function(buf, off, len) {
+    waitforFd(this.fd, false, true);
+    var written = write(this.fd, buf, off, len);
+    if (written <= 0) // XXX <= or < ? what happens in the '==' case?
+      throw errnoException(socketError(fd), 'write');
+    return written;
   }
 };
 common.copyProps(stream.InStreamProto, Connection.prototype);
+common.copyProps(stream.OutStreamProto, Connection.prototype);

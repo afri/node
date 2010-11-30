@@ -111,15 +111,16 @@ exports.open = function(path, flags, mode) {
   return fd;
 };
 
-exports.write = function(fd, buffer, offset, length, position) {
+exports.write = function(fd, buffer, offset, length, position /*=null*/) {
+  if (position === undefined) position = null;
   waitfor (var err, written) {
     fs.write(fd, buffer, offset, length, position, resume);
   }
   if (err) throw err;
-  return fd;
+  return written;
 };
 
-exports.read = function(fd, buffer, offset, length, position) {
+exports.read = function(fd, buffer, offset, length, position /*=null*/) {
   if (position === undefined) position = null;
   waitfor (var err, bytesRead) {
     fs.read(fd, buffer, offset, length, position, resume);
@@ -166,26 +167,36 @@ exports.waitforChange = function(filename, interval /*=0*/) {
 }; 
 
 //----------------------------------------------------------------------
-// File Input Streams
+// File Streams
 
 exports.openInStream = function(path, flags /*='r'*/, mode /*=0666*/) {
   var fd = exports.open(path, flags || 'r', mode || 0666);
-  return new FileInStream(fd);
+  return new FileStream(fd);
 };
 
-function FileInStream(fd) {
+exports.openOutStream = function(path, flags /*='a'*/, mode /*=0666*/) {
+  var fd = exports.open(path, flags || 'a', mode || 0666);
+  return new FileStream(fd);
+};
+
+function FileStream(fd) {
   this.fd = fd;
-  this.ip = 0;
 }
-FileInStream.prototype = {
+FileStream.prototype = {
   close : function() { delete this.rbuffer; exports.close(this.fd); },
   __finally__ : function() { this.close(); },
 
   readRaw : function(buf) {
-    var bytesRead = exports.read(this.fd, buf, 0, buf.length, this.ip);
-    if (bytesRead < 0) throw "Read error"; // XXX errno
-    this.ip += bytesRead;
+    var bytesRead = exports.read(this.fd, buf, 0, buf.length);
+    if (bytesRead < 0) throw "Read error ("+bytesRead+")"; // XXX errno
+    //this.ip += bytesRead;
     return bytesRead;
+  },
+  writeRaw : function(buf, off, len) {
+    var bytesWritten = exports.write(this.fd, buf, off, len);
+    if (bytesWritten <= 0) throw "Write error ("+bytesWritten+")"; // XXX errno
+    return bytesWritten;
   }
 };
-common.copyProps(stream.InStreamProto, FileInStream.prototype);
+common.copyProps(stream.InStreamProto, FileStream.prototype);
+common.copyProps(stream.OutStreamProto, FileStream.prototype);
