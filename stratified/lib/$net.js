@@ -13,6 +13,9 @@ var net_binding = process.binding('net');
 var socket  = net_binding.socket; // (tcp|tcp4|tcp6|unix|unix_dgram|udp|udp4|udp6)
 var close   = net_binding.close; // (fd)
 var connect = net_binding.connect; // (fd, (port, [host] | path))
+var bind    = net_binding.bind;
+var listen  = net_binding.listen;
+var accept  = net_binding.accept;
 var read    = net_binding.read; // (fd, buf, off, len)
 var write   = net_binding.write; // (fd, buf, off, len)
 var socketError = net_binding.socketError; 
@@ -51,7 +54,7 @@ function toPort (x) { return (x = Number(x)) >= 0 ? x : false; }
 
 //----------------------------------------------------------------------
 
-exports.createConnection = function (/* port,[host] | path */) {
+exports.createConnection = function(/* port,[host] | path */) {
   var port = toPort(arguments[0]);
   var type;
   if (port === false)
@@ -79,15 +82,92 @@ exports.createConnection = function (/* port,[host] | path */) {
 };
 
 //----------------------------------------------------------------------
+
+exports.createServer = function(/* port,[host] | path */) {
+  var port = toPort(arguments[0]);
+  var type;
+  if (port === false)
+    type = 'unix';
+  else
+    type = ((arguments[1] = require('$dns').lookup(arguments[1])).family == 4 ?
+            'tcp4' : 'tcp6');
+  var fd = socket(type);
+  try {
+    bind(fd, arguments[0], arguments[1]);
+    listen(fd, 100);
+  }
+  catch (e) {
+    close(fd);
+    throw e;
+  }
+  return new Server(fd, type);
+};
+
+//----------------------------------------------------------------------
+// Server class
+
+function Server(listenfd, type) {
+  this.listenfd = listenfd;
+  this.type = type;
+}
+Server.prototype = {
+  close : function() {
+    if (this.listenfd === null) return;
+    close(this.listenfd);
+    this.listenfd = null;
+  },
+  __finally__ : function() { this.close(); },
+  accept : function() {
+    var peerInfo;
+    do {
+      waitforFd(this.listenfd, true, false);
+    } while (!(peerInfo = accept(this.listenfd)));
+    var c = new Connection(peerInfo.fd, this.type);
+    c.remoteAddress = peerInfo.address;
+    c.remotePort = peerInfo.port;
+    return c;
+  },
+  
+  run : function(handler) {
+    var s = this;
+    function inner() {
+      var c = s.accept();
+      waitfor {
+        try {
+          handler(c);
+        }
+        catch(e) {
+          console.log("Exception in connection to "+c.remoteAddress+":"+c.remotePort+" : "+e);
+        }
+        finally {
+          c.close();
+        }
+      }
+      and {
+        // accept next connection
+        inner();
+      }
+    }
+    inner();
+  }
+};
+
+//----------------------------------------------------------------------
 // Connection class
 
+// fd = connected socket
 function Connection(fd, type) {
   this.fd = fd;
   this.type = type;
 }
 Connection.prototype = {
-  destroy: function() { delete this.rbuffer; close(this.fd); this.fd = null;},
-  __finally__ : function() { this.destroy(); },
+  close : function() {
+    if (this.fd === null) return;
+    delete this.rbuffer;
+    close(this.fd);
+    this.fd = null;
+  },
+  __finally__ : function() { this.close(); },
 
   readRaw : function(buf) {
     // get some more data
