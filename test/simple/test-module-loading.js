@@ -1,9 +1,17 @@
-common = require("../common");
-assert = common.assert
+var common = require('../common');
+var assert = require('assert');
 var path = require('path'),
     fs   = require('fs');
 
 common.debug("load test-module-loading.js");
+
+// require a file with a request that includes the extension
+var a_js = require("../fixtures/a.js");
+assert.equal(42, a_js.number);
+
+// require a file without any extensions
+var foo_no_ext = require("../fixtures/foo");
+assert.equal("ok", foo_no_ext.foo);
 
 var a = require("../fixtures/a");
 var c = require("../fixtures/b/c");

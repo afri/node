@@ -1,9 +1,9 @@
-common = require("../common");
-assert = common.assert
-net = require("net");
-http = require("http");
-url = require("url");
-qs = require("querystring");
+var common = require('../common');
+var assert = require('assert');
+var net = require('net');
+var http = require('http');
+var url = require("url");
+var qs = require("querystring");
 
 var request_number = 0;
 var requests_sent = 0;

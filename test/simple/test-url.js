@@ -1,8 +1,8 @@
-common = require("../common");
-assert = common.assert
+var common = require('../common');
+var assert = require('assert');
 
-var url = require("url"),
-  util = require("util");
+var url = require('url'),
+    util = require('util');
 
 // URLs to parse, and expected data
 // { url : parsed }

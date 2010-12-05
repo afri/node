@@ -1,10 +1,9 @@
-common = require("../common");
-assert = common.assert
+var common = require('../common');
+var assert = require('assert');
+var http = require('http');
+var net = require('net');
 
-http = require('http');
-net = require('net');
-
-server = http.createServer(function (req, res) {
+var server = http.createServer(function (req, res) {
   common.error('got req');
   throw new Error("This shouldn't happen.");
 });
@@ -16,7 +15,7 @@ server.addListener('upgrade', function (req, socket, upgradeHead) {
   throw new Error('upgrade error');
 });
 
-gotError = false;
+var gotError = false;
 
 process.addListener('uncaughtException', function (e) {
   common.error('got "clientError" event');
@@ -31,11 +30,10 @@ server.listen(common.PORT, function () {
 
   c.addListener('connect', function () {
     common.error('client wrote message');
-    c.write( "GET /blah HTTP/1.1\r\n"
-           + "Upgrade: WebSocket\r\n"
-           + "Connection: Upgrade\r\n"
-           + "\r\n\r\nhello world"
-           );
+    c.write("GET /blah HTTP/1.1\r\n" +
+            "Upgrade: WebSocket\r\n" +
+            "Connection: Upgrade\r\n" +
+            "\r\n\r\nhello world");
   });
 
   c.addListener('end', function () {

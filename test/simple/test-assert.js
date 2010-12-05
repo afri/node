@@ -1,6 +1,5 @@
-common = require("../common");
-assert = common.assert
-
+var common = require("../common");
+var assert = require('assert');
 var a = require('assert');
 
 function makeBlock (f) {
@@ -115,7 +114,7 @@ assert.throws(makeBlock(a.deepEqual, 'a', {}), a.AssertionError);
 function thrower (errorConstructor){
   throw new errorConstructor('test');
 }
-aethrow = makeBlock(thrower, a.AssertionError);
+var aethrow = makeBlock(thrower, a.AssertionError);
 aethrow = makeBlock(thrower, a.AssertionError);
 
 // the basic calls work
@@ -158,3 +157,13 @@ assert.equal(true,threw,'a.doesNotThrow is not catching type matching errors');
 assert.throws(function () {assert.ifError(new Error('test error'))});
 assert.doesNotThrow(function(){assert.ifError(null)});
 assert.doesNotThrow(function(){assert.ifError()});
+
+// use a RegExp to validate error message
+a.throws(makeBlock(thrower, TypeError), /test/ );
+
+// use a fn to validate error object
+a.throws(makeBlock(thrower, TypeError), function(err) {
+    if (!(err instanceof TypeError) || !/test/.test(err)) {
+        return false;
+    }
+});

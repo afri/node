@@ -2,8 +2,8 @@
 // the HTTP client. This test uses a raw TCP server to better control server
 // behavior.
 
-common = require("../common");
-assert = common.assert
+var common = require('../common');
+var assert = require('assert');
 
 var http = require('http');
 var net = require('net');
@@ -38,10 +38,9 @@ srv.listen(common.PORT, '127.0.0.1', function () {
       assert.equal(upgradeHead, 'nurtzo');
 
       console.log(res.headers);
-      var expectedHeaders = { "hello": "world"
-                            , "connection": "upgrade" 
-                            , "upgrade": "websocket"
-                            };
+      var expectedHeaders = { "hello": "world",
+                              "connection": "upgrade",
+                              "upgrade": "websocket" };
       assert.deepEqual(expectedHeaders, res.headers);
 
       socket.end();

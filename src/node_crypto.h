@@ -30,6 +30,7 @@ class SecureContext : ObjectWrap {
   static v8::Handle<v8::Value> SetKey(const v8::Arguments& args);
   static v8::Handle<v8::Value> SetCert(const v8::Arguments& args);
   static v8::Handle<v8::Value> AddCACert(const v8::Arguments& args);
+  static v8::Handle<v8::Value> AddRootCerts(const v8::Arguments& args);
   static v8::Handle<v8::Value> SetCiphers(const v8::Arguments& args);
   static v8::Handle<v8::Value> Close(const v8::Arguments& args);
 
@@ -39,7 +40,13 @@ class SecureContext : ObjectWrap {
   }
 
   ~SecureContext() {
-    // Free up
+    if (ctx_) {
+      SSL_CTX_free(ctx_);
+      ctx_ = NULL;
+      ca_store_ = NULL;
+    } else {
+      assert(ca_store_ == NULL);
+    }
   }
 
  private:
@@ -59,7 +66,7 @@ class SecureStream : ObjectWrap {
   static v8::Handle<v8::Value> ClearIn(const v8::Arguments& args);
   static v8::Handle<v8::Value> GetPeerCertificate(const v8::Arguments& args);
   static v8::Handle<v8::Value> IsInitFinished(const v8::Arguments& args);
-  static v8::Handle<v8::Value> VerifyPeer(const v8::Arguments& args);
+  static v8::Handle<v8::Value> VerifyError(const v8::Arguments& args);
   static v8::Handle<v8::Value> GetCurrentCipher(const v8::Arguments& args);
   static v8::Handle<v8::Value> Shutdown(const v8::Arguments& args);
   static v8::Handle<v8::Value> Start(const v8::Arguments& args);
@@ -82,7 +89,6 @@ class SecureStream : ObjectWrap {
   BIO *bio_write_;
   SSL *ssl_;
   bool is_server_; /* coverity[member_decl] */
-  bool should_verify_; /* coverity[member_decl] */
 };
 
 void InitCrypto(v8::Handle<v8::Object> target);

@@ -1,5 +1,5 @@
-common = require("../common");
-assert = common.assert
+var common = require('../common');
+var assert = require('assert');
 
 console.log("process.pid: " + process.pid);
 
@@ -19,7 +19,7 @@ process.addListener('SIGUSR1', function () {
   }, 5);
 });
 
-i = 0;
+var i = 0;
 setInterval(function () {
   console.log("running process..." + ++i);
 

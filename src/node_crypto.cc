@@ -3,6 +3,7 @@
 
 #include <node.h>
 #include <node_buffer.h>
+#include <node_root_certs.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -30,12 +31,6 @@ static Persistent<String> name_symbol;
 static Persistent<String> version_symbol;
 
 
-static int verify_callback(int ok, X509_STORE_CTX *ctx) {
-  assert(ok);
-  return(1); // Ignore errors by now. VerifyPeer will catch them by using SSL_get_verify_result.
-}
-
-
 void SecureContext::Initialize(Handle<Object> target) {
   HandleScope scope;
 
@@ -47,6 +42,7 @@ void SecureContext::Initialize(Handle<Object> target) {
   NODE_SET_PROTOTYPE_METHOD(t, "setKey", SecureContext::SetKey);
   NODE_SET_PROTOTYPE_METHOD(t, "setCert", SecureContext::SetCert);
   NODE_SET_PROTOTYPE_METHOD(t, "addCACert", SecureContext::AddCACert);
+  NODE_SET_PROTOTYPE_METHOD(t, "addRootCerts", SecureContext::AddRootCerts);
   NODE_SET_PROTOTYPE_METHOD(t, "setCiphers", SecureContext::SetCiphers);
   NODE_SET_PROTOTYPE_METHOD(t, "close", SecureContext::Close);
 
@@ -69,36 +65,36 @@ Handle<Value> SecureContext::Init(const Arguments& args) {
 
   OPENSSL_CONST SSL_METHOD *method = SSLv23_method();
 
-  if (args.Length() == 1) {
-    if (!args[0]->IsString())
-    return ThrowException(Exception::TypeError(
-          String::New("Bad parameter")));
-
+  if (args.Length() == 1 && args[0]->IsString()) {
     String::Utf8Value sslmethod(args[0]->ToString());
-    if (strcmp(*sslmethod, "SSLv2_method") == 0)
+
+    if (strcmp(*sslmethod, "SSLv2_method") == 0) {
       method = SSLv2_method();
-    if (strcmp(*sslmethod, "SSLv2_server_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv2_server_method") == 0) {
       method = SSLv2_server_method();
-    if (strcmp(*sslmethod, "SSLv2_client_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv2_client_method") == 0) {
       method = SSLv2_client_method();
-    if (strcmp(*sslmethod, "SSLv3_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv3_method") == 0) {
       method = SSLv3_method();
-    if (strcmp(*sslmethod, "SSLv3_server_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv3_server_method") == 0) {
       method = SSLv3_server_method();
-    if (strcmp(*sslmethod, "SSLv3_client_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv3_client_method") == 0) {
       method = SSLv3_client_method();
-    if (strcmp(*sslmethod, "SSLv23_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv23_method") == 0) {
       method = SSLv23_method();
-    if (strcmp(*sslmethod, "SSLv23_server_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv23_server_method") == 0) {
       method = SSLv23_server_method();
-    if (strcmp(*sslmethod, "SSLv23_client_method") == 0)
+    } else if (strcmp(*sslmethod, "SSLv23_client_method") == 0) {
       method = SSLv23_client_method();
-    if (strcmp(*sslmethod, "TLSv1_method") == 0)
+    } else if (strcmp(*sslmethod, "TLSv1_method") == 0) {
       method = TLSv1_method();
-    if (strcmp(*sslmethod, "TLSv1_server_method") == 0)
+    } else if (strcmp(*sslmethod, "TLSv1_server_method") == 0) {
       method = TLSv1_server_method();
-    if (strcmp(*sslmethod, "TLSv1_client_method") == 0)
+    } else if (strcmp(*sslmethod, "TLSv1_client_method") == 0) {
       method = TLSv1_client_method();
+    } else {
+      return ThrowException(Exception::Error(String::New("Unknown method")));
+    }
   }
 
   sc->ctx_ = SSL_CTX_new(method);
@@ -213,6 +209,37 @@ Handle<Value> SecureContext::AddCACert(const Arguments& args) {
 }
 
 
+Handle<Value> SecureContext::AddRootCerts(const Arguments& args) {
+  HandleScope scope;
+
+  SecureContext *sc = ObjectWrap::Unwrap<SecureContext>(args.Holder());
+
+  for (int i = 0; root_certs[i]; i++) {
+    // TODO: reuse bp ?
+    BIO *bp = BIO_new(BIO_s_mem());
+
+    if (!BIO_write(bp, root_certs[i], strlen(root_certs[i]))) {
+      BIO_free(bp);
+      return False();
+    }
+
+    X509 *x509 = PEM_read_bio_X509(bp, NULL, NULL, NULL);
+
+    if (x509 == NULL) {
+      BIO_free(bp);
+      return False();
+    }
+
+    X509_STORE_add_cert(sc->ca_store_, x509);
+
+    BIO_free(bp);
+    X509_free(x509);
+  }
+
+  return True();
+}
+
+
 Handle<Value> SecureContext::SetCiphers(const Arguments& args) {
   HandleScope scope;
 
@@ -236,6 +263,8 @@ Handle<Value> SecureContext::Close(const Arguments& args) {
 
   if (sc->ctx_ != NULL) {
     SSL_CTX_free(sc->ctx_);
+    sc->ctx_ = NULL;
+    sc->ca_store_ = NULL;
     return True();
   }
 
@@ -279,13 +308,59 @@ void SecureStream::Initialize(Handle<Object> target) {
   NODE_SET_PROTOTYPE_METHOD(t, "encPending", SecureStream::EncPending);
   NODE_SET_PROTOTYPE_METHOD(t, "getPeerCertificate", SecureStream::GetPeerCertificate);
   NODE_SET_PROTOTYPE_METHOD(t, "isInitFinished", SecureStream::IsInitFinished);
-  NODE_SET_PROTOTYPE_METHOD(t, "verifyPeer", SecureStream::VerifyPeer);
+  NODE_SET_PROTOTYPE_METHOD(t, "verifyError", SecureStream::VerifyError);
   NODE_SET_PROTOTYPE_METHOD(t, "getCurrentCipher", SecureStream::GetCurrentCipher);
   NODE_SET_PROTOTYPE_METHOD(t, "start", SecureStream::Start);
   NODE_SET_PROTOTYPE_METHOD(t, "shutdown", SecureStream::Shutdown);
   NODE_SET_PROTOTYPE_METHOD(t, "close", SecureStream::Close);
 
   target->Set(String::NewSymbol("SecureStream"), t->GetFunction());
+}
+
+
+static int VerifyCallback(int preverify_ok, X509_STORE_CTX *ctx) {
+  // Quoting SSL_set_verify(3ssl):
+  //
+  //   The VerifyCallback function is used to control the behaviour when
+  //   the SSL_VERIFY_PEER flag is set. It must be supplied by the
+  //   application and receives two arguments: preverify_ok indicates,
+  //   whether the verification of the certificate in question was passed
+  //   (preverify_ok=1) or not (preverify_ok=0). x509_ctx is a pointer to
+  //   the complete context used for the certificate chain verification.
+  //
+  //   The certificate chain is checked starting with the deepest nesting
+  //   level (the root CA certificate) and worked upward to the peer's
+  //   certificate.  At each level signatures and issuer attributes are
+  //   checked.  Whenever a verification error is found, the error number is
+  //   stored in x509_ctx and VerifyCallback is called with preverify_ok=0.
+  //   By applying X509_CTX_store_* functions VerifyCallback can locate the
+  //   certificate in question and perform additional steps (see EXAMPLES).
+  //   If no error is found for a certificate, VerifyCallback is called
+  //   with preverify_ok=1 before advancing to the next level.
+  //
+  //   The return value of VerifyCallback controls the strategy of the
+  //   further verification process. If VerifyCallback returns 0, the
+  //   verification process is immediately stopped with "verification
+  //   failed" state. If SSL_VERIFY_PEER is set, a verification failure
+  //   alert is sent to the peer and the TLS/SSL handshake is terminated. If
+  //   VerifyCallback returns 1, the verification process is continued. If
+  //   VerifyCallback always returns 1, the TLS/SSL handshake will not be
+  //   terminated with respect to verification failures and the connection
+  //   will be established. The calling process can however retrieve the
+  //   error code of the last verification error using
+  //   SSL_get_verify_result(3) or by maintaining its own error storage
+  //   managed by VerifyCallback.
+  //
+  //   If no VerifyCallback is specified, the default callback will be
+  //   used.  Its return value is identical to preverify_ok, so that any
+  //   verification failure will lead to a termination of the TLS/SSL
+  //   handshake with an alert message, if SSL_VERIFY_PEER is set.
+  //
+  // Since we cannot perform I/O quickly enough in this callback, we ignore
+  // all preverify_ok errors and let the handshake continue. It is
+  // imparative that the user use SecureStream::VerifyError after the
+  // 'secure' callback has been made.
+  return 1;
 }
 
 
@@ -303,16 +378,19 @@ Handle<Value> SecureStream::New(const Arguments& args) {
   SecureContext *sc = ObjectWrap::Unwrap<SecureContext>(args[0]->ToObject());
 
   bool is_server = args[1]->BooleanValue();
-  bool should_verify = args[2]->BooleanValue();
 
   p->ssl_ = SSL_new(sc->ctx_);
   p->bio_read_ = BIO_new(BIO_s_mem());
   p->bio_write_ = BIO_new(BIO_s_mem());
   SSL_set_bio(p->ssl_, p->bio_read_, p->bio_write_);
 
-  if ((p->should_verify_ = should_verify)) {
-    SSL_set_verify(p->ssl_, SSL_VERIFY_PEER, verify_callback);
-  }
+#ifdef SSL_MODE_RELEASE_BUFFERS
+  long mode = SSL_get_mode(p->ssl_);
+  SSL_set_mode(p->ssl_, mode | SSL_MODE_RELEASE_BUFFERS);
+#endif
+
+  // Always allow a connection. We'll reject in javascript.
+  SSL_set_verify(p->ssl_, SSL_VERIFY_PEER, VerifyCallback);
 
   if ((p->is_server_ = is_server)) {
     SSL_set_accept_state(p->ssl_);
@@ -637,32 +715,142 @@ Handle<Value> SecureStream::IsInitFinished(const Arguments& args) {
 }
 
 
-Handle<Value> SecureStream::VerifyPeer(const Arguments& args) {
+Handle<Value> SecureStream::VerifyError(const Arguments& args) {
   HandleScope scope;
 
   SecureStream *ss = ObjectWrap::Unwrap<SecureStream>(args.Holder());
 
-  if (ss->ssl_ == NULL) return False();
-  if (!ss->should_verify_) return False();
+  if (ss->ssl_ == NULL) return Null();
+
+#if 0
+  // Why?
   X509* peer_cert = SSL_get_peer_certificate(ss->ssl_);
-  if (peer_cert==NULL) return False();
+  if (peer_cert == NULL) return False();
   X509_free(peer_cert);
+#endif
 
   long x509_verify_error = SSL_get_verify_result(ss->ssl_);
 
-  // Can also check for:
-  // X509_V_ERR_CERT_HAS_EXPIRED
-  // X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT
-  // X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN
-  // X509_V_ERR_INVALID_CA
-  // X509_V_ERR_PATH_LENGTH_EXCEEDED
-  // X509_V_ERR_INVALID_PURPOSE
-  // X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT
+  Local<String> s;
 
-  // printf("%s\n", X509_verify_cert_error_string(x509_verify_error));
+  switch (x509_verify_error) {
+    case X509_V_OK:
+      return Null();
 
-  if (!x509_verify_error) return True();
-  return False();
+    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
+      s = String::New("UNABLE_TO_GET_ISSUER_CERT");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_GET_CRL:
+      s = String::New("UNABLE_TO_GET_CRL");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_DECRYPT_CERT_SIGNATURE:
+      s = String::New("UNABLE_TO_DECRYPT_CERT_SIGNATURE");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
+      s = String::New("UNABLE_TO_DECRYPT_CRL_SIGNATURE");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY:
+      s = String::New("UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY");
+      break;
+
+    case X509_V_ERR_CERT_SIGNATURE_FAILURE:
+      s = String::New("CERT_SIGNATURE_FAILURE");
+      break;
+
+    case X509_V_ERR_CRL_SIGNATURE_FAILURE:
+      s = String::New("CRL_SIGNATURE_FAILURE");
+      break;
+
+    case X509_V_ERR_CERT_NOT_YET_VALID:
+      s = String::New("CERT_NOT_YET_VALID");
+      break;
+
+    case X509_V_ERR_CERT_HAS_EXPIRED:
+      s = String::New("CERT_HAS_EXPIRED");
+      break;
+
+    case X509_V_ERR_CRL_NOT_YET_VALID:
+      s = String::New("CRL_NOT_YET_VALID");
+      break;
+
+    case X509_V_ERR_CRL_HAS_EXPIRED:
+      s = String::New("CRL_HAS_EXPIRED");
+      break;
+
+    case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
+      s = String::New("ERROR_IN_CERT_NOT_BEFORE_FIELD");
+      break;
+
+    case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
+      s = String::New("ERROR_IN_CERT_NOT_AFTER_FIELD");
+      break;
+
+    case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
+      s = String::New("ERROR_IN_CRL_LAST_UPDATE_FIELD");
+      break;
+
+    case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
+      s = String::New("ERROR_IN_CRL_NEXT_UPDATE_FIELD");
+      break;
+
+    case X509_V_ERR_OUT_OF_MEM:
+      s = String::New("OUT_OF_MEM");
+      break;
+
+    case X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT:
+      s = String::New("DEPTH_ZERO_SELF_SIGNED_CERT");
+      break;
+
+    case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
+      s = String::New("SELF_SIGNED_CERT_IN_CHAIN");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY:
+      s = String::New("UNABLE_TO_GET_ISSUER_CERT_LOCALLY");
+      break;
+
+    case X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE:
+      s = String::New("UNABLE_TO_VERIFY_LEAF_SIGNATURE");
+      break;
+
+    case X509_V_ERR_CERT_CHAIN_TOO_LONG:
+      s = String::New("CERT_CHAIN_TOO_LONG");
+      break;
+
+    case X509_V_ERR_CERT_REVOKED:
+      s = String::New("CERT_REVOKED");
+      break;
+
+    case X509_V_ERR_INVALID_CA:
+      s = String::New("INVALID_CA");
+      break;
+
+    case X509_V_ERR_PATH_LENGTH_EXCEEDED:
+      s = String::New("PATH_LENGTH_EXCEEDED");
+      break;
+
+    case X509_V_ERR_INVALID_PURPOSE:
+      s = String::New("INVALID_PURPOSE");
+      break;
+
+    case X509_V_ERR_CERT_UNTRUSTED:
+      s = String::New("CERT_UNTRUSTED");
+      break;
+
+    case X509_V_ERR_CERT_REJECTED:
+      s = String::New("CERT_REJECTED");
+      break;
+
+    default:
+      s = String::New(X509_verify_cert_error_string(x509_verify_error));
+      break;
+  }
+
+  return scope.Close(s);
 }
 
 

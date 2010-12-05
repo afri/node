@@ -1,7 +1,7 @@
-common = require("../common");
-assert = common.assert
-http = require("http");
-url = require("url");
+var common = require('../common');
+var assert = require('assert');
+var http = require('http');
+var url = require("url");
 
 function p (x) {
   common.error(common.inspect(x));
