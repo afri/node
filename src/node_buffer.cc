@@ -574,12 +574,19 @@ Handle<Value> Buffer::BinaryWrite(const Arguments &args) {
   }
 
   char *p = (char*)buffer->data_ + offset;
-
+  
   size_t towrite = args[2]->IsUndefined() ? buffer->length_ - offset
                                           : args[2]->Uint32Value();
-  towrite = MIN((unsigned long) s->Length(), towrite);
-  int written = DecodeWrite(p, towrite, s, BINARY);
-  return scope.Close(Integer::New(written));
+
+  size_t string_offset = args[3]->Uint32Value();
+
+  towrite = MIN((unsigned long) s->Length()-string_offset, towrite);
+
+  int written = s->WriteBinary(p, string_offset, towrite,
+                               String::HINT_MANY_WRITES_EXPECTED);
+
+  
+  return scope.Close(Integer::New(towrite));
 }
 
 
