@@ -10,6 +10,9 @@ var fs = require('fs');
 var common = require('common');
 var stream = require('$stream');
 
+var fs_binding = process.binding('fs');
+var write = fs_binding.write;
+
 //----------------------------------------------------------------------
 
 exports.rename = function(path1, path2) {
@@ -114,7 +117,7 @@ exports.open = function(path, flags, mode) {
 exports.write = function(fd, buffer, offset, length, position /*=null*/) {
   if (position === undefined) position = null;
   waitfor (var err, written) {
-    fs.write(fd, buffer, offset, length, position, resume);
+    write(fd, buffer, offset, length, position, resume);
   }
   if (err) throw err;
   return written;
@@ -192,10 +195,18 @@ FileStream.prototype = {
     //this.ip += bytesRead;
     return bytesRead;
   },
-  writeRaw : function(buf, off, len) {
+  writeRawOld : function(buf, off, len) {
     var bytesWritten = exports.write(this.fd, buf, off, len);
     if (bytesWritten <= 0) throw "Write error ("+bytesWritten+")"; // XXX errno
     return bytesWritten;
+  },
+  writeRaw : function(buf, off, len) {
+    waitfor (var err, written) {
+      write(this.fd, buf, off, len, null, resume);
+    }
+    if (err) throw err;
+    if (written <= 0) throw "Write error ("+bytesWritten+")"; // XXX errno
+    return written;
   }
 };
 common.copyProps(stream.InStreamProto, FileStream.prototype);
