@@ -3103,6 +3103,35 @@ int String::WriteAscii(char* buffer,
   return i;
 }
 
+int String::WriteBinary(char* buffer,
+                        int start,
+                        int length,
+                        WriteHints hints) const {
+  if (IsDeadCheck("v8::String::WriteBinary()")) return 0;
+  LOG_API("String::WriteBinary");
+  ENTER_V8;
+  ASSERT(start >= 0 && length >= -1);
+  i::Handle<i::String> str = Utils::OpenHandle(this);
+  StringTracker::RecordWrite(str);
+  if (hints & HINT_MANY_WRITES_EXPECTED) {
+    // Flatten the string for efficiency.  This applies whether we are
+    // using StringInputBuffer or Get(i) to access the characters.
+    str->TryFlatten();
+  }
+  int end = length;
+  if ( (length == -1) || (length > str->length() - start) )
+    end = str->length() - start;
+  if (end < 0) return 0;
+  write_input_buffer.Reset(start, *str);
+  int i;
+  for (i = 0; i < end; i++) {
+    buffer[i] = static_cast<char>(write_input_buffer.GetNext());
+  }
+  if (length == -1 || i < length)
+    buffer[i] = '\0';
+  return i;
+}
+
 
 int String::Write(uint16_t* buffer,
                   int start,
@@ -3119,12 +3148,12 @@ int String::Write(uint16_t* buffer,
     // using StringInputBuffer or Get(i) to access the characters.
     str->TryFlatten();
   }
-  int end = length;
+  int end = length+start;
   if ( (length == -1) || (length > str->length() - start) )
-    end = str->length() - start;
+    end = str->length();
   if (end < 0) return 0;
   i::String::WriteToFlat(*str, buffer, start, end);
-  if (length == -1 || end < length)
+  if (length == -1 || end-start < length)
     buffer[end] = '\0';
   return end;
 }

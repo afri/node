@@ -1018,6 +1018,10 @@ class String : public Primitive {
                           int start = 0,
                           int length = -1,
                           WriteHints hints = NO_HINTS) const;  // ASCII
+  V8EXPORT int WriteBinary(char* buffer,
+                           int start = 0,
+                           int length = -1,
+                           WriteHints hints = NO_HINTS) const;  // BINARY
   V8EXPORT int WriteUtf8(char* buffer,
                          int length = -1,
                          int* nchars_ref = NULL,
