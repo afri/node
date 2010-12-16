@@ -35,27 +35,26 @@ Here is an example of a echo server which listens for connections
 on port 8124:
 
     var net = require('net');
-    var server = net.createServer(function (stream) {
-      stream.setEncoding('utf8');
-      stream.on('connect', function () {
-        stream.write('hello\r\n');
-      });
-      stream.on('data', function (data) {
-        stream.write(data);
-      });
-      stream.on('end', function () {
-        stream.write('goodbye\r\n');
-        stream.end();
-      });
+    var server = net.createServer(function (c) {
+      c.write('hello\r\n');
+      c.pipe(c);
     });
     server.listen(8124, 'localhost');
 
-To listen on the socket `'/tmp/echo.sock'`, the last line would just be
+Test this by using `telnet`:
+
+    telnet localhost 8124
+
+To listen on the socket `/tmp/echo.sock` the last line would just be
 changed to
 
     server.listen('/tmp/echo.sock');
 
-This is an `EventEmitter` with the following events:
+Use `nc` to connect to a UNIX domain socket server:
+
+    nc -U /tmp/echo.sock
+
+`net.Server` is an `EventEmitter` with the following events:
 
 #### server.listen(port, [host], [callback])
 
@@ -154,8 +153,8 @@ and passed to the user through the `'connection'` event of a server.
 
 `net.Stream` instances are EventEmitters with the following events:
 
-#### stream.connect(port, [host])
-#### stream.connect(path)
+#### stream.connect(port, [host], [callback])
+#### stream.connect(path, [callback])
 
 Opens the connection for a given stream. If `port` and `host` are given,
 then the stream will be opened as a TCP stream, if `host` is omitted,
@@ -170,6 +169,9 @@ This function is asynchronous. When the `'connect'` event is emitted the
 stream is established. If there is a problem connecting, the `'connect'`
 event will not be emitted, the `'error'` event will be emitted with
 the exception.
+
+The `callback` paramenter will be added as an listener for the 'connect'
+event.
 
 
 #### stream.setEncoding(encoding=null)
@@ -197,21 +199,29 @@ context of the defined or default list of trusted CA certificates.
 Returns a JSON structure detailing the peer's certificate, containing a dictionary
 with keys for the certificate `'subject'`, `'issuer'`, `'valid_from'` and `'valid_to'`.
 
-#### stream.write(data, encoding='ascii')
+#### stream.write(data, [encoding], [callback])
 
-Sends data on the stream. The second parameter specifies the encoding in
-the case of a string--it defaults to ASCII because encoding to UTF8 is rather
-slow.
+Sends data on the stream. The second parameter specifies the encoding in the
+case of a string--it defaults to UTF8 encoding.
 
 Returns `true` if the entire data was flushed successfully to the kernel
 buffer. Returns `false` if all or part of the data was queued in user memory.
 `'drain'` will be emitted when the buffer is again free.
 
+The optional `callback` parameter will be executed when the data is finally
+written out - this may not be immediately.
+
+#### stream.write(data, [encoding], [fileDescriptor], [callback])
+
+For UNIX sockets, it is possible to send a file descriptor through the
+stream. Simply add the `fileDescriptor` argument and listen for the `'fd'`
+event on the other end.
+
+
 #### stream.end([data], [encoding])
 
 Half-closes the stream. I.E., it sends a FIN packet. It is possible the
-server will still send some data. After calling this `readyState` will be
-`'readOnly'`.
+server will still send some data.
 
 If `data` is specified, it is equivalent to calling `stream.write(data, encoding)`
 followed by `stream.end()`.
@@ -263,9 +273,6 @@ The string representation of the remote IP address. For example,
 
 This member is only present in server-side connections.
 
-#### stream.readyState
-
-Either `'closed'`, `'open'`, `'opening'`, `'readOnly'`, or `'writeOnly'`.
 
 #### Event: 'connect'
 
@@ -292,9 +299,7 @@ By default (`allowHalfOpen == false`) the stream will destroy its file
 descriptor  once it has written out its pending write queue.  However, by
 setting `allowHalfOpen == true` the stream will not automatically `end()`
 its side allowing the user to write arbitrary amounts of data, with the
-caveat that the user is required to `end()` their side now. In the
-`allowHalfOpen == true` case after `'end'` is emitted the `readyState` will
-be `'writeOnly'`.
+caveat that the user is required to `end()` their side now.
 
 
 #### Event: 'timeout'

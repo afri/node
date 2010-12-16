@@ -187,6 +187,9 @@ def configure(conf):
 
   conf.env["USE_OPROFILE"] = o.use_oprofile
 
+  if o.use_oprofile:
+    conf.check(lib=['bfd', 'opagent'], uselib_store="OPROFILE")
+
   conf.check(lib='dl', uselib_store='DL')
   if not sys.platform.startswith("sunos") and not sys.platform.startswith("cygwin"):
     conf.env.append_value("CCFLAGS", "-rdynamic")
@@ -575,7 +578,7 @@ def build(bld):
   node = bld.new_task_gen("cxx", product_type)
   node.name         = "node"
   node.target       = "node"
-  node.uselib = 'RT EV OPENSSL CARES EXECINFO DL KVM SOCKET NSL UTIL'
+  node.uselib = 'RT EV OPENSSL CARES EXECINFO DL KVM SOCKET NSL UTIL OPROFILE'
   node.add_objects = 'eio http_parser'
   if product_type_is_lib:
     node.install_path = '${PREFIX}/lib'
@@ -600,6 +603,7 @@ def build(bld):
     src/node_stdio.cc
     src/node_timer.cc
     src/node_script.cc
+    src/node_os.cc
   """
   node.source += bld.env["PLATFORM_FILE"]
   if not product_type_is_lib:
