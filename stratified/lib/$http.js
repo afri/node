@@ -29,13 +29,9 @@ Server.prototype = {
   __finally__ : function() { this.close(); },
   run : function(handleRequest) {
     function handleConnection(tcpcon) {
-      // we do our own buffering into packets:
-      // tcpcon.setNoDelay(true);
-
       // keep the connection open until closed, error or timeout:
       try {
         while (true) {
-          var request;
           waitfor {
             // 1 minute timeout on connection
             // XXX should also have a means of reaping connections if
@@ -47,7 +43,7 @@ Server.prototype = {
           or {
             // it's ok to let this throw; we'll just close the tcp
             // connection if it does
-            request = readRequest(tcpcon);
+            var request = readRequest(tcpcon);
           }
           
           // we've got a request, let the handler handle it
@@ -57,15 +53,14 @@ Server.prototype = {
           using (request)
             handleRequest(request);
           
-          if (request.version == "0" &&
-              request.headers["Connection"] != "Keep-Alive")
+          if (!request.keepAlive)
             return; // http version 1.0 -> close the connection
         }
       }
       catch (e) {
         // ignore silently; could just be EPIPE
-//       __js console.log("Connection "+
-//                    tcpcon.remoteAddress+ " : " + e);
+       __js console.log("Connection "+
+                    tcpcon.remoteAddress+ " : " + e);
       }
       finally {
         __js tcpcon.__finally__();
@@ -96,7 +91,7 @@ function readRequest(tcpcon) {
   */
 
   __js {
-    var r = new IncomingRequest();//reqs.alloc();
+    var r = reqs.alloc();
     r.init(matches[1], // method
            parseURL(matches[2]), // url
            matches[3],
@@ -129,12 +124,11 @@ __js function parseHeaders(head) {
 var R = 0;
 
 __js {
+
 var reqs = new FreeList('req', 50,
                         function() {
                           return new IncomingRequest();
                                     });
-
-
 
   function IncomingRequest() {
     this.writebuffer = stream.createStringBuf();
@@ -152,6 +146,7 @@ var reqs = new FreeList('req', 50,
     this.replyStarted = false;
     this.bodySent = false;
     this.chunked = false;
+    this.keepAlive = ((version == 1) || (headers["Connection"]=="Keep-Alive"));
     ++R;
     if (R%20 == 0) console.log("request "+R);
   };
@@ -176,7 +171,7 @@ IncomingRequest.prototype.__finally__ = function() {
     this.writeSimpleOctetBody("");
   }
   this.sink.flush();
-//  __js reqs.free(this); 
+  __js reqs.free(this); 
 };
 
 //----------------------------------------------------------------------
@@ -186,7 +181,7 @@ IncomingRequest.prototype.__finally__ = function() {
 // writeSimple[Type]Body, write[X], and a final call to __finally__:
 __js IncomingRequest.prototype.writeResponseHead = function(status, title, mimeType, extraHeaders) {
   var header = "HTTP/1.1 "+status+" "+title+"\r\n";
-  if (this.headers["Connection"] == "Keep-Alive")
+  if (this.keepAlive)
     header += "Connection: Keep-Alive\r\n";
   if (mimeType)
     header += "Content-Type: "+mimeType+"\r\n";
@@ -204,8 +199,9 @@ IncomingRequest.prototype.writeSimpleOctetBody = function(octets) {
   //  assert(!this.bodySent && !this.chunked && this.replyStarted)
   __js this.sink.writeOctets("Content-Length: "+
                              l+"\r\n\r\n");
-  if (l > 2000) {
+  if (l > 10000) {
     // get writebuffer out of the picture
+    // XXX might want to peel off a substring to go into first packet
     this.sink.flush();
     this.sink = this.tcpcon;
   }
@@ -217,22 +213,32 @@ IncomingRequest.prototype.writeSimpleOctetBody = function(octets) {
   
 IncomingRequest.prototype.writeErrorResponse = function(status, title, text) {
   __js  this.writeResponseHead(status, title, "text/html");
-  // XXX write as utf8
+  // XXX write as utf8?
   this.writeSimpleOctetBody(
     "<html><head><title>"+status+" "+title+"</title></head>"+
       "<body><h4>"+status+" "+title+"</h4>"+
       text+"</body></html>");
 };
 
+IncomingRequest.prototype.writeRedirectResponse = function(location, status) {
+  if (!status) status = 302;
+  var resp = "<html><head><title>"+status+" Redirect</title></head>";
+  resp += "<body><h4>"+status+" Redirect</h4>";
+  resp += "The document can be found at <a href='"+location+"'>"+location+"</a>.";
+  resp += "</body></html>";
+  this.writeResponseHead(status, "Redirect", "text/html", ["Location: "+location]);
+  this.writeSimpleOctetBody(resp);
+  },
+
 IncomingRequest.prototype.writeHTMLResponse = function(s) {
   __js  this.writeResponseHead(200, "OK", "text/html");
-  // xxx use utf8
+  // xxx use utf8?
   this.writeSimpleOctetBody(s);
 };
 
 IncomingRequest.prototype.writeTextResponse = function(s) {
   __js  this.writeResponseHead(200, "OK", "text/plain");
-  // xxx use utf8
+  // xxx use utf8?
   this.writeSimpleOctetBody(s);
 //  this.sink.flush();
 };
