@@ -44,13 +44,6 @@ __js var ioWatchers = new FreeList("iowatcher",500, function () {
   return new IOWatcher();
 });
 
-function waitforWatcher(w) {
-  waitfor() {
-    w.callback = resume;
-    __js w.start();
-  }
-}
-
 function waitforFd(fd, r, w) {
   __js if (fd === null) throw "Socket is closed";
   __js var watcher = ioWatchers.alloc();
@@ -124,16 +117,12 @@ exports.createServer = function(/* port,[host] | path */) {
 __js {
   function Server(listenfd, type) {
     this.listenfd = listenfd;
-    this.watcher = ioWatchers.alloc();
-    this.watcher.set(this.listenfd, true, false);
     this.type = type;
   }
   Server.prototype = {};
   
   Server.prototype.close = function() {
     if (this.listenfd !== null) {
-      this.watcher.stop();
-      ioWatchers.free(this.watcher);
       close(this.listenfd);
       this.listenfd = null;
     }
@@ -143,11 +132,9 @@ __js {
 }
 
 Server.prototype.accept = function() {
-  //while (!(peerInfo = accept(this.listenfd)))
-  //  waitforWatcher(this.watcher);
   __js var peerInfo = accept(this.listenfd);
   if (!peerInfo) {
-    waitforWatcher(this.watcher);
+    waitforFd(this.listenfd, true, false);
     __js var peerInfo = accept(this.listenfd);
   }
   __js var c = connections.alloc();
@@ -207,14 +194,11 @@ Server.prototype.run2 = function(handler) {
 // Connection class
 
 __js {
-
-  var C = 0;
   var connections = new FreeList("connection", 100, function() {
     return new Connection();
   });
   
   function Connection() {
-    this.rwatcher = new IOWatcher();
   }
   Connection.prototype = {};
   common.copyProps(stream.InStreamProto, Connection.prototype);
@@ -226,14 +210,10 @@ __js {
     this.type = type;
     this.remoteAddress = remoteAddress;
     this.remotePort = remotePort;
-    this.rwatcher.set(this.fd, true, false);
-//    this.rwatcher.start();
-//    ++C;
-//    if (C%80==0) console.log(C+' concurrent connections');
   };
   
   Connection.prototype.close = function() {
-    this.rwatcher.stop();
+    if (this.fd === null) return;
     //      shutdown(this.fd, "write");
     close(this.fd);
     this.fd = null;
@@ -244,7 +224,6 @@ __js {
   };
   
   Connection.prototype.__finally__ = function() {
-//    --C;
     this.close();
     connections.free(this);
   };
@@ -252,11 +231,9 @@ __js {
 
 //----------------------------------------------------------------------
 // InStream methods:
-  
 Connection.prototype.readRaw = function(buf) {
   // get some more data
-  waitforWatcher(this.rwatcher);
-  //    waitforFd(this.fd, true, false);
+  waitforFd(this.fd, true, false);
   __js var bytesRead = read(this.fd, buf, 0, buf.length);
   return bytesRead;
 };
