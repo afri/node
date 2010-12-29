@@ -14,6 +14,7 @@ var fs_binding = process.binding('fs');
 var write = fs_binding.write;
 
 //----------------------------------------------------------------------
+// low-level:
 
 exports.rename = function(path1, path2) {
   waitfor (var err) { fs.rename(path1, path2, resume); }
@@ -168,6 +169,27 @@ exports.waitforChange = function(filename, interval /*=0*/) {
   
   return { curr: curr, prev: prev }; 
 }; 
+
+//----------------------------------------------------------------------
+// high-level
+
+exports.isFile = function(path) {
+  try {
+    return exports.stat(path).isFile();
+  }
+  catch (e) {
+    return false;
+  }
+};
+
+exports.isDirectory = function(path) {
+  try {
+    return exports.stat(path).isDirectory();
+  }
+  catch (e) {
+    return false;
+  }
+};
 
 //----------------------------------------------------------------------
 // File Streams
