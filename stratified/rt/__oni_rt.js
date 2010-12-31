@@ -15,7 +15,7 @@ if(type=="t"&&(value instanceof Error)&&value._oniE!==token_oniE&&line!=="passth
 value.lineNumber=line;
 value.fileName=file||"unknown SJS source";
 value.stack="";
-if(!value.hasOwnProperty('toString'))value.toString=function(){return this.name+": "+this.message+" ("+this.fileName+(this.lineNumber?":"+this.lineNumber:"")+")"}
+if(!value.hasOwnProperty('toString'))value.toString=function(){return this.name+": "+this.message+" (in "+this.fileName+(this.lineNumber?":"+this.lineNumber:"")+")"}
 ;
 }
 this.val=value;
@@ -144,7 +144,7 @@ return this}
 if(this.i==3)this.l=rv;
 else this.pars.push(rv);
 }
-try{switch(this.ndata[0]){case 0:if(typeof this.l=="function")rv=this.l.apply(this.args.tobj,this.pars);
+try{switch(this.ndata[0]){case 0:if(typeof this.l=="function"&&this.l.apply)rv=this.l.apply(this.args.tobj,this.pars);
 else if(!testIsFunction(this.l)){rv=new CFException("t",new Error("'"+this.l+"' is not a function"),this.ndata[1],this.args.file);
 }
 else{var command="this.l(";for(var i=0;i<this.pars.length;++i){if(i)command+=",";
@@ -153,7 +153,7 @@ command+="this.pars["+i+"]";
 command+=")";
 rv=eval(command);
 }
-break;case 1:if(!this.l[0]){rv=new CFException("t",new Error("'"+this.l[1]+"' on '"+this.l[0]+"' is not a function"),this.ndata[1],this.args.file);
+break;case 1:if(this.l[0]===undefined){rv=new CFException("t",new Error("'"+this.l[1]+"' on '"+this.l[0]+"' is not a function"),this.ndata[1],this.args.file);
 }
 else if(typeof this.l[0][this.l[1]]=="function"){rv=this.l[0][this.l[1]].apply(this.l[0],this.pars);
 }
@@ -596,6 +596,7 @@ else{for(var i=0;i<seq.length;++i)rv+=seq[i].nb();
 return rv}
 function top_stmt_scope(pctx){return pctx.stmt_scopes[pctx.stmt_scopes.length-1]}
 function begin_script(pctx){if(pctx.filename)pctx.fn=pctx.filename.replace(/'/g,"\\'");
+pctx.optimize=false;
 if(pctx.scopes!==undefined)throw "Internal parser error: Nested script";pctx.decl_scopes=[];
 pctx.stmt_scopes=[];
 pctx.nb_ctx=0;
@@ -641,7 +642,8 @@ this.clauses=clauses;
 ph_switch.prototype=new ph();
 ph_switch.prototype.val=function(){var clauses="["+this.clauses.join(",")+"]";return "__oni_rt.Switch("+this.exp.v()+","+clauses+")"}
 ;
-function ph_fun_exp(fname,pars,body,pctx){this.code="function "+fname+"("+pars.join(",")+"){"+body+"}";
+function ph_fun_exp(fname,pars,body,pctx){this.is_nblock=pctx.optimize;
+this.code="function "+fname+"("+pars.join(",")+"){"+body+"}";
 }
 ph_fun_exp.prototype=new ph();
 ph_fun_exp.prototype.is_nblock=true;
@@ -697,7 +699,7 @@ function gen_var_decl(decls,pctx){return gen_var_compound(decls,pctx).toBlock()}
 function ph_var_decl(d,pctx){this.d=d;
 this.is_empty=this.d.length<2;
 this.line=pctx.line;
-if(!this.is_empty)this.is_nblock=d[1].is_nblock;
+if(!this.is_empty)this.is_nblock=pctx.optimize&&d[1].is_nblock;
 }
 ph_var_decl.prototype=new ph();
 ph_var_decl.prototype.is_var_decl=true;
@@ -749,7 +751,7 @@ return rv+")"}
 function ph_throw(exp,pctx){this.exp=exp;
 this.line=exp.line;
 this.file=pctx.fn;
-this.is_nblock=exp.is_nblock;
+this.is_nblock=pctx.optimize&&exp.is_nblock;
 }
 ph_throw.prototype=new ph();
 ph_throw.prototype.nblock_val=function(){return "throw "+this.exp.nb()+";"}
@@ -759,7 +761,7 @@ ph_throw.prototype.val=function(){return "__oni_rt.Scall("+this.line+",__oni_rt.
 function ph_return(exp,pctx){this.line=pctx.line;
 this.exp=exp;
 this.nb_ctx=pctx.nb_ctx;
-this.is_nblock=exp?exp.is_nblock:true;
+this.is_nblock=pctx.optimize&&(exp?exp.is_nblock:true);
 }
 ph_return.prototype=new ph();
 ph_return.prototype.nblock_val=function(){var rv;if(this.nb_ctx){rv="return";
@@ -821,7 +823,7 @@ function ph_with(exp,body,pctx){this.exp=exp;
 this.body=body;
 this.line=this.exp.line;
 this.file=pctx.fn;
-this.is_nblock=exp.is_nblock&&body.is_nblock;
+this.is_nblock=pctx.optimize&&exp.is_nblock&&body.is_nblock;
 }
 ph_with.prototype=new ph();
 ph_with.prototype.nblock_val=function(){return "with("+this.exp.nb()+")"+this.body.nb()}
@@ -841,7 +843,7 @@ function ph_infix_op(left,id,right,pctx){this.left=left;
 this.id=id;
 this.right=right;
 this.line=pctx.line;
-this.is_nblock=left.is_nblock&&right.is_nblock;
+this.is_nblock=pctx.optimize&&left.is_nblock&&right.is_nblock;
 }
 ph_infix_op.prototype=new ph();
 ph_infix_op.prototype.is_value=true;
@@ -856,7 +858,7 @@ function ph_assign_op(left,id,right,pctx){if(!left.is_ref&&!left.is_id)throw "In
 this.id=id;
 this.right=right;
 this.line=pctx.line;
-this.is_nblock=left.is_nblock&&right.is_nblock;
+this.is_nblock=pctx.optimize&&left.is_nblock&&right.is_nblock;
 }
 ph_assign_op.prototype=new ph();
 ph_assign_op.prototype.is_value=true;
@@ -873,7 +875,7 @@ return rv}
 function ph_prefix_op(id,right,pctx){this.id=id;
 this.right=right;
 this.line=pctx.line;
-this.is_nblock=right.is_nblock;
+this.is_nblock=pctx.optimize&&right.is_nblock;
 }
 ph_prefix_op.prototype=new ph();
 ph_prefix_op.prototype.is_value=true;
@@ -890,7 +892,7 @@ return rv}
 function ph_postfix_op(left,id,pctx){if(!left.is_ref&&!left.is_id)throw "Invalid argument for postfix op '"+id+"'";this.left=left;
 this.id=id;
 this.line=pctx.line;
-this.is_nblock=left.is_nblock;
+this.is_nblock=pctx.optimize&&left.is_nblock;
 }
 ph_postfix_op.prototype=new ph();
 ph_postfix_op.prototype.is_value=true;
@@ -898,7 +900,7 @@ ph_postfix_op.prototype.nblock_val=function(){return this.left.nb()+this.id+" "}
 ;
 ph_postfix_op.prototype.val=function(){var rv;if(this.left.is_nblock){rv=nblock_val_to_val(this.nb(),true,this.line);
 }
-else if(this.right.is_ref){rv="__oni_rt.Scall("+this.line+",function(l){return l[0][l[1]]"+this.id+"},"+this.left.ref()+")";
+else if(this.left.is_ref){rv="__oni_rt.Scall("+this.line+",function(l){return l[0][l[1]]"+this.id+"},"+this.left.ref()+")";
 }
 return rv}
 ;
@@ -950,7 +952,7 @@ return rv}
 function ph_dot_accessor(l,name,pctx){this.l=l;
 this.name=name;
 this.line=pctx.line;
-this.is_nblock=l.is_nblock;
+this.is_nblock=pctx.optimize&&l.is_nblock;
 }
 ph_dot_accessor.prototype=new ph();
 ph_dot_accessor.prototype.is_ref=true;
@@ -964,7 +966,7 @@ ph_dot_accessor.prototype.ref=function(){return "__oni_rt.Scall("+this.line+",fu
 function ph_idx_accessor(l,idxexp,pctx){this.l=l;
 this.idxexp=idxexp;
 this.line=pctx.line;
-this.is_nblock=l.is_nblock&&idxexp.is_nblock;
+this.is_nblock=pctx.optimize&&l.is_nblock&&idxexp.is_nblock;
 }
 ph_idx_accessor.prototype=new ph();
 ph_idx_accessor.prototype.is_ref=true;
@@ -975,8 +977,8 @@ ph_idx_accessor.prototype.val=function(){return "__oni_rt.Scall("+this.line+",fu
 ;
 ph_idx_accessor.prototype.ref=function(){if(this.is_nblock)return "(function(arguments){return ["+this.l.nb()+","+this.idxexp.nb()+"]})";else return "__oni_rt.Scall("+this.line+",function(l, idx){return [l, idx];},"+this.l.v()+","+this.idxexp.v()+")"}
 ;
-function ph_group(e){this.e=e;
-this.is_nblock=e.is_nblock;
+function ph_group(e,pctx){this.e=e;
+this.is_nblock=pctx.optimize&&e.is_nblock;
 }
 ph_group.prototype=new ph();
 ph_group.prototype.is_value=true;
@@ -986,7 +988,7 @@ ph_group.prototype.val=function(){return this.e.v()}
 ;
 function ph_arr_lit(elements,pctx){this.elements=elements;
 this.line=pctx.line;
-this.is_nblock=is_nblock_arr(elements);
+this.is_nblock=pctx.optimize&&is_nblock_arr(elements);
 }
 ph_arr_lit.prototype=new ph();
 ph_arr_lit.prototype.is_value=true;
@@ -1001,7 +1003,7 @@ return rv+")"}
 ;
 function ph_obj_lit(props,pctx){this.props=props;
 this.line=pctx.line;
-this.is_nblock=(function(){for(var i=0;i<props.length;++i)if(!props[i][2].is_nblock)return false;return true}
+this.is_nblock=pctx.optimize&&(function(){for(var i=0;i<props.length;++i)if(!props[i][2].is_nblock)return false;return true}
 )();
 }
 ph_obj_lit.prototype=new ph();
@@ -1024,7 +1026,7 @@ function ph_conditional(t,c,a,pctx){this.t=t;
 this.c=c;
 this.a=a;
 this.line=t.line;
-this.is_nblock=t.is_nblock&&c.is_nblock&&a.is_nblock;
+this.is_nblock=pctx.optimize&&t.is_nblock&&c.is_nblock&&a.is_nblock;
 }
 ph_conditional.prototype=new ph();
 ph_conditional.prototype.is_value=true;
@@ -1121,7 +1123,7 @@ Hash.prototype={lookup:function(key){return this["$"+key]}
 ,del:function(key){delete this["$"+key];
 }
 };
-var TOKENIZER_SA=/(?:[ \f\r\t\v\u00A0\u2028\u2029]+|\/\/.*)*(?:((?:\n|\/\*(?:.|\n|\r)*?\*\/)+)|((?:0[xX][\da-fA-F]+)|(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?))|(\/(?:\\.|\[(?:\\.|[^\\n]])*\]|[^\/\n])+\/[gimy]*)|([$%_\w]+|==|!=|>>|<<|<=|>=|--|\+\+|\|\||&&|[-*\/%+&^|]=|[;,?:|^&=<>+\-*\/%!~.\[\]{}()])|('(?:\\.|[^\'\n])*'|"(?:\\.|[^\"\n])*")|('(?:\\.|[^\'])*'|"(?:\\.|[^\"])*")|(\S+))/g;var TOKENIZER_OP=/(?:[ \f\r\t\v\u00A0\u2028\u2029]+|\/\/.*)*(?:((?:\n|\/\*(?:.|\n|\r)*?\*\/)+)|(>>>=|===|!==|>>>|<<=|>>=|[$%_\w]+|==|!=|>>|<<|<=|>=|--|\+\+|\|\||&&|[-*\/%+&^|]=|[;,?:|^&=<>+\-*\/%!~.\[\]{}()]))/g;function SemanticToken(){}
+var TOKENIZER_SA=/(?:[ \f\r\t\v\u00A0\u2028\u2029]+|\/\/.*)*(?:((?:\n|\/\*(?:.|\n|\r)*?\*\/)+)|((?:0[xX][\da-fA-F]+)|(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?))|(\/(?:\\.|\[(?:\\.|[^\\n]])*\]|[^\/\n])+\/[gimy]*)|(==|!=|>>|<<|<=|>=|--|\+\+|\|\||&&|[-*\/%+&^|]=|[;,?:|^&=<>+\-*\/%!~.\[\]{}()]|[$_\w]+)|('(?:\\.|[^\'\n])*'|"(?:\\.|[^\"\n])*")|('(?:\\.|[^\'])*'|"(?:\\.|[^\"])*")|(\S+))/g;var TOKENIZER_OP=/(?:[ \f\r\t\v\u00A0\u2028\u2029]+|\/\/.*)*(?:((?:\n|\/\*(?:.|\n|\r)*?\*\/)+)|(>>>=|===|!==|>>>|<<=|>>=|==|!=|>>|<<|<=|>=|--|\+\+|\|\||&&|[-*\/%+&^|]=|[;,?:|^&=<>+\-*\/%!~.\[\]{}()]|[$_\w]+))/g;function SemanticToken(){}
 SemanticToken.prototype={exsf:function(pctx,st){throw "Unexpected "+this}
 ,excbp:0,excf:function(left,pctx,st){throw "Unexpected "+this}
 ,stmtf:null,tokenizer:TOKENIZER_SA,toString:function(){return "'"+this.id+"'"}
@@ -1190,7 +1192,7 @@ scan(pctx,")");
 return new ph_new(exp,args)}
 );
 S("(").exs(function(pctx,st){var e=parseExp(pctx);scan(pctx,")");
-return new ph_group(e)}
+return new ph_group(e,pctx)}
 ).exc(260,function(l,pctx,st){var args=[];while(pctx.token.id!=")"){if(args.length)scan(pctx,",");
 args.push(parseExp(pctx,110));
 }
@@ -1445,9 +1447,9 @@ else{if(has_var)throw "Syntax error in 'using' expression";exp=e1;
 scan(pctx,")");
 var body=parseStmt(pctx);return gen_using(has_var,lhs,exp,body,pctx)}
 );
-S("__js").stmt(function(pctx){++pctx.nb_ctx;
-var body=parseStmt(pctx);--pctx.nb_ctx;
-body.is_nblock=true;
+S("__js").stmt(function(pctx){if(pctx.optimize)++pctx.nb_ctx;
+var body=parseStmt(pctx);if(pctx.optimize)--pctx.nb_ctx;
+body.is_nblock=pctx.optimize;
 return body}
 );
 function makeParserContext(src,settings){var ctx={src:src,line:1,lastIndex:0,token:null};if(settings)for(var a in settings)ctx[a]=settings[a];
