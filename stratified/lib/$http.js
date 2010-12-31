@@ -147,8 +147,16 @@ var reqs = new FreeList('req', 50,
     this.bodySent = false;
     this.chunked = false;
     this.keepAlive = ((version == 1) || (headers["Connection"]=="Keep-Alive"));
-    ++R;
-    if (R%20 == 0) console.log("request "+R);
+    if (headers["Content-Length"] > 0) {
+      // XXX implement streaming
+      // XXX implement chunked bodies
+      var l = parseInt(headers["Content-Length"]);
+      if (l > 100*1024) throw "Request body too large";
+      this.body = tcpcon.readOctets(l,l);
+      //console.log('read body "'+this.body+'"');
+    }
+//    ++R;
+//    if (R%20 == 0) console.log("request "+R);
   };
 
 
@@ -159,7 +167,7 @@ var reqs = new FreeList('req', 50,
   
 // finish off reply:
 IncomingRequest.prototype.__finally__ = function() {
-  --R;
+//  --R;
   if (!this.replyStarted) {
     this.writeErrorResponse(501, "Not Implemented",
                             "The server is not configured to fulfill this request.");
