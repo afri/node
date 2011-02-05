@@ -159,7 +159,7 @@ Server.prototype.run = function(handler) {
   
   while(1) {
     var c = this.accept();
-    spawn(H, c);
+    spawn H(c);
   }
 };
 

@@ -69,7 +69,7 @@ Server.prototype = {
     //this.tcpserver.run2(handleConnection);
     while (1) {
       var c = this.tcpserver.accept();
-      spawn(handleConnection, c);
+      spawn handleConnection(c);
     }
     
   }

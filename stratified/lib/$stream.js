@@ -18,7 +18,7 @@ __js var b4bufs = new FreeList('b4buf', 10,
 
 // pool of 4K buffers for general socket & file IO:
 __js var iobufs = new FreeList('iobuf', 500,
-                               function() { return new Buffer(8*1024); });
+                               function() { return new Buffer(16*1024); });
 
 //----------------------------------------------------------------------
 // InStream prototype
@@ -272,7 +272,7 @@ exports.OutStreamProto = {
     //    }
     //    finally {
     __js iobufs.free(buf);
-    //    }    
+    //    }
   },
   
   writeUtf8 : function(data) {
@@ -413,17 +413,14 @@ RingBuf.prototype.attach = function(os) {
           me.remove = (me.remove + written) % me.size; 
         }
         //        console.log("done to disk");
-        spawn(prodWrite, written);
+        spawn prodWrite(written);
         
         waitfor () { me.resumeRead = resume; }
         finally { me.resumeRead = null; }
       }
     } catch(e) { console.log(e+" "+me.os); /*XXX what to do */ }
   }
-  // hmm, we want waitfor { reader() } and { continue; }
-  // or synchronous spawn; in the meanwhile, the hold(0) is important here
-  spawn(reader);
-  hold(0);
+  spawn reader();
 };
 
 RingBuf.prototype.detach = function() {
