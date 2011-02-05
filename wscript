@@ -630,8 +630,9 @@ def build(bld):
 
   native_cc = bld.new_task_gen(
     source= bld.path.ant_glob('stratified/lib/*.js') +
-            ' stratified/rt/__$oni_rt.js stratified/rt/__oni_rt.js ' + 
-            'src/node.js ' + bld.path.ant_glob('lib/*.js'),
+            ' stratified/rt/__$oni_rt.js stratified/rt/__oni_rt.js' + 
+            ' stratified/rt/_third_party_main.js' +
+            ' src/node.js ' + bld.path.ant_glob('lib/*.js'),
     target="src/node_natives.h",
     before="cxx",
     install_path=None
