@@ -33,7 +33,7 @@ Emitted if there was an error receiving data.
 
 `function () { }`
 
-Emitted when the underlying file descriptor has be closed. Not all streams
+Emitted when the underlying file descriptor has been closed. Not all streams
 will emit this.  (For example, an incoming HTTP request will not emit
 `'close'`.)
 
@@ -65,6 +65,11 @@ Resumes the incoming `'data'` events after a `pause()`.
 
 Closes the underlying file descriptor. Stream will not emit any more events.
 
+
+### stream.destroySoon()
+
+After the write queue is drained, close the file descriptor.
+
 ### stream.pipe(destination, [options])
 
 This is a `Stream.prototype` method available on all `Stream`s.
@@ -75,7 +80,8 @@ streams are kept in sync by pausing and resuming as necessary.
 
 Emulating the Unix `cat` command:
 
-    process.openStdin().pipe(process.stdout);
+    process.stdin.resume();
+    process.stdin.pipe(process.stdout);
 
 
 By default `end()` is called on the destination when the source stream emits
@@ -84,9 +90,13 @@ By default `end()` is called on the destination when the source stream emits
 
 This keeps `process.stdout` open so that "Goodbye" can be written at the end.
 
-    var stdin = process.openStdin();
-    stdin.pipe(process.stdout, { end: false });
-    stdin.on("end", function() { process.stdout.write("Goodbye\n"); });
+    process.stdin.resume();
+
+    process.stdin.pipe(process.stdout, { end: false });
+
+    process.stdin.on("end", function() {
+      process.stdout.write("Goodbye\n");
+    });
 
 NOTE: If the source stream does not support `pause()` and `resume()`, this function
 adds simple definitions which simply emit `'pause'` and `'resume'` events on
@@ -115,7 +125,7 @@ Emitted on error with the exception `exception`.
 
 Emitted when the underlying file descriptor has been closed.
 
-### stream.writeable
+### stream.writable
 
 A boolean that is `true` by default, but turns `false` after an `'error'`
 occurred or `end()` / `destroy()` was called.

@@ -34,7 +34,8 @@ bugs: FAIL
 ##############################################################################
 # Too slow in debug mode with --stress-opt
 compiler/regress-stacktrace-methods: PASS, SKIP if $mode == debug
-
+compiler/regress-funcaller: PASS, SKIP if $mode == debug
+regress/regress-create-exception: PASS, SKIP if $mode == debug
 
 ##############################################################################
 # This one uses a built-in that's only present in debug mode. It takes
@@ -104,11 +105,20 @@ regress/regress-create-exception: SKIP
 regress/regress-3218915: SKIP
 regress/regress-3247124: SKIP
 
+
 ##############################################################################
 [ $arch == arm && $crankshaft ]
 
-# Test that currently fail with crankshaft on ARM.
+# Test that currently fails with crankshaft on ARM.
 compiler/simple-osr: FAIL
+
+
+##############################################################################
+[ $arch == x64 && $crankshaft ]
+
+# BUG (1026) This test is currently flaky.
+compiler/simple-osr: SKIP
+
 
 ##############################################################################
 [ $arch == mips ]

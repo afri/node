@@ -309,9 +309,9 @@ void Deoptimizer::TearDown() {
 }
 
 
-unsigned Deoptimizer::GetOutputInfo(DeoptimizationOutputData* data,
-                                    unsigned id,
-                                    SharedFunctionInfo* shared) {
+int Deoptimizer::GetOutputInfo(DeoptimizationOutputData* data,
+                               unsigned id,
+                               SharedFunctionInfo* shared) {
   // TODO(kasperl): For now, we do a simple linear search for the PC
   // offset associated with the given node id. This should probably be
   // changed to a binary search.
@@ -618,17 +618,17 @@ void Deoptimizer::DoTranslateCommand(TranslationIterator* iterator,
     }
 
     case Translation::ARGUMENTS_OBJECT: {
-      // Use the hole value as a sentinel and fill in the arguments object
-      // after the deoptimized frame is built.
+      // Use the arguments marker value as a sentinel and fill in the arguments
+      // object after the deoptimized frame is built.
       ASSERT(frame_index == 0);  // Only supported for first frame.
       if (FLAG_trace_deopt) {
         PrintF("    0x%08" V8PRIxPTR ": [top + %d] <- ",
                output_[frame_index]->GetTop() + output_offset,
                output_offset);
-        Heap::the_hole_value()->ShortPrint();
+        Heap::arguments_marker()->ShortPrint();
         PrintF(" ; arguments object\n");
       }
-      intptr_t value = reinterpret_cast<intptr_t>(Heap::the_hole_value());
+      intptr_t value = reinterpret_cast<intptr_t>(Heap::arguments_marker());
       output_[frame_index]->SetFrameSlot(output_offset, value);
       return;
     }
@@ -807,6 +807,44 @@ bool Deoptimizer::DoOsrTranslateCommand(TranslationIterator* iterator,
 
   if (!duplicate) *input_offset -= kPointerSize;
   return true;
+}
+
+
+void Deoptimizer::PatchStackCheckCode(Code* unoptimized_code,
+                                      Code* check_code,
+                                      Code* replacement_code) {
+  // Iterate over the stack check table and patch every stack check
+  // call to an unconditional call to the replacement code.
+  ASSERT(unoptimized_code->kind() == Code::FUNCTION);
+  Address stack_check_cursor = unoptimized_code->instruction_start() +
+      unoptimized_code->stack_check_table_start();
+  uint32_t table_length = Memory::uint32_at(stack_check_cursor);
+  stack_check_cursor += kIntSize;
+  for (uint32_t i = 0; i < table_length; ++i) {
+    uint32_t pc_offset = Memory::uint32_at(stack_check_cursor + kIntSize);
+    Address pc_after = unoptimized_code->instruction_start() + pc_offset;
+    PatchStackCheckCodeAt(pc_after, check_code, replacement_code);
+    stack_check_cursor += 2 * kIntSize;
+  }
+}
+
+
+void Deoptimizer::RevertStackCheckCode(Code* unoptimized_code,
+                                       Code* check_code,
+                                       Code* replacement_code) {
+  // Iterate over the stack check table and revert the patched
+  // stack check calls.
+  ASSERT(unoptimized_code->kind() == Code::FUNCTION);
+  Address stack_check_cursor = unoptimized_code->instruction_start() +
+      unoptimized_code->stack_check_table_start();
+  uint32_t table_length = Memory::uint32_at(stack_check_cursor);
+  stack_check_cursor += kIntSize;
+  for (uint32_t i = 0; i < table_length; ++i) {
+    uint32_t pc_offset = Memory::uint32_at(stack_check_cursor + kIntSize);
+    Address pc_after = unoptimized_code->instruction_start() + pc_offset;
+    RevertStackCheckCodeAt(pc_after, check_code, replacement_code);
+    stack_check_cursor += 2 * kIntSize;
+  }
 }
 
 
@@ -1096,7 +1134,7 @@ int Translation::NumberOfOperandsFor(Opcode opcode) {
 }
 
 
-#ifdef DEBUG
+#ifdef OBJECT_PRINT
 
 const char* Translation::StringFor(Opcode opcode) {
   switch (opcode) {

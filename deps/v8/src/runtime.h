@@ -66,7 +66,6 @@ namespace internal {
   \
   F(IsInPrototypeChain, 2, 1) \
   F(SetHiddenPrototype, 2, 1) \
-  F(SetMathFunctionId, 2, 1) \
   \
   F(IsConstructCall, 0, 1) \
   \
@@ -107,6 +106,7 @@ namespace internal {
   F(URIEscape, 1, 1) \
   F(URIUnescape, 1, 1) \
   F(QuoteJSONString, 1, 1) \
+  F(QuoteJSONStringComma, 1, 1) \
   \
   F(NumberToString, 1, 1) \
   F(NumberToStringSkipCache, 1, 1) \
@@ -284,7 +284,7 @@ namespace internal {
   F(NewContext, 1, 1) \
   F(PushContext, 1, 1) \
   F(PushCatchContext, 1, 1) \
-  F(LookupContext, 2, 1) \
+  F(DeleteContextSlot, 2, 1) \
   F(LoadContextSlot, 2, 2) \
   F(LoadContextSlotNoReferenceError, 2, 2) \
   F(StoreContextSlot, 3, 1) \
@@ -309,6 +309,13 @@ namespace internal {
   F(LocalKeys, 1, 1) \
   /* Cache suport */ \
   F(GetFromCache, 2, 1) \
+  \
+  /* Message objects */ \
+  F(NewMessageObject, 2, 1) \
+  F(MessageGetType, 1, 1) \
+  F(MessageGetArguments, 1, 1) \
+  F(MessageGetStartPosition, 1, 1) \
+  F(MessageGetScript, 1, 1) \
   \
   /* Pseudo functions - handled as macros by parser */ \
   F(IS_VAR, 1, 1)
@@ -343,8 +350,8 @@ namespace internal {
   F(IsBreakOnException, 1, 1) \
   F(PrepareStep, 3, 1) \
   F(ClearStepping, 0, 1) \
-  F(DebugEvaluate, 4, 1) \
-  F(DebugEvaluateGlobal, 3, 1) \
+  F(DebugEvaluate, 5, 1) \
+  F(DebugEvaluateGlobal, 4, 1) \
   F(DebugGetLoadedScripts, 0, 1) \
   F(DebugReferencedBy, 3, 1) \
   F(DebugConstructedBy, 2, 1) \
@@ -362,9 +369,14 @@ namespace internal {
   F(LiveEditReplaceRefToNestedFunction, 3, 1) \
   F(LiveEditPatchFunctionPositions, 2, 1) \
   F(LiveEditCheckAndDropActivations, 2, 1) \
-  F(LiveEditCompareStringsLinewise, 2, 1) \
+  F(LiveEditCompareStrings, 2, 1) \
   F(GetFunctionCodePositionFromSource, 2, 1) \
-  F(ExecuteInDebugContext, 2, 1)
+  F(ExecuteInDebugContext, 2, 1) \
+  \
+  F(SetFlags, 1, 1) \
+  F(CollectGarbage, 1, 1) \
+  F(GetHeapUsage, 0, 1)
+
 #else
 #define RUNTIME_FUNCTION_LIST_DEBUGGER_SUPPORT(F)
 #endif

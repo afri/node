@@ -134,6 +134,7 @@ void PendingListNode::WeakCallback(v8::Persistent<v8::Value>, void* data) {
 
 
 static bool IsOptimizable(JSFunction* function) {
+  if (Heap::InNewSpace(function)) return false;
   Code* code = function->code();
   return code->kind() == Code::FUNCTION && code->optimizable();
 }
@@ -165,8 +166,10 @@ static void AttemptOnStackReplacement(JSFunction* function) {
   }
 
   SharedFunctionInfo* shared = function->shared();
-  // If the code is not optimizable, don't try OSR.
-  if (!shared->code()->optimizable()) return;
+  // If the code is not optimizable or references context slots, don't try OSR.
+  if (!shared->code()->optimizable() || !shared->allows_lazy_compilation()) {
+    return;
+  }
 
   // We are not prepared to do OSR for a function that already has an
   // allocated arguments object.  The optimized code would bypass it for
@@ -190,22 +193,9 @@ static void AttemptOnStackReplacement(JSFunction* function) {
   if (maybe_check_code->ToObject(&check_code)) {
     Code* replacement_code = Builtins::builtin(Builtins::OnStackReplacement);
     Code* unoptimized_code = shared->code();
-    // Iterate the unoptimized code and patch every stack check except at
-    // the function entry.  This code assumes the function entry stack
-    // check appears first i.e., is not deferred or otherwise reordered.
-    bool first = true;
-    for (RelocIterator it(unoptimized_code, RelocInfo::kCodeTargetMask);
-         !it.done();
-         it.next()) {
-      RelocInfo* rinfo = it.rinfo();
-      if (rinfo->target_address() == Code::cast(check_code)->entry()) {
-        if (first) {
-          first = false;
-        } else {
-          Deoptimizer::PatchStackCheckCode(rinfo, replacement_code);
-        }
-      }
-    }
+    Deoptimizer::PatchStackCheckCode(unoptimized_code,
+                                     Code::cast(check_code),
+                                     replacement_code);
   }
 }
 
@@ -350,6 +340,7 @@ void RuntimeProfiler::OptimizeSoon(JSFunction* function) {
 }
 
 
+#ifdef ENABLE_LOGGING_AND_PROFILING
 static void UpdateStateRatio(SamplerState current_state) {
   static const int kStateWindowSize = 128;
   static SamplerState state_window[kStateWindowSize];
@@ -366,15 +357,18 @@ static void UpdateStateRatio(SamplerState current_state) {
   NoBarrier_Store(&js_ratio, state_counts[IN_JS_STATE] * 100 /
                   kStateWindowSize);
 }
+#endif
 
 
 void RuntimeProfiler::NotifyTick() {
+#ifdef ENABLE_LOGGING_AND_PROFILING
   // Record state sample.
   SamplerState state = Top::IsInJSState()
       ? IN_JS_STATE
       : IN_NON_JS_STATE;
   UpdateStateRatio(state);
   StackGuard::RequestRuntimeProfilerTick();
+#endif
 }
 
 
@@ -428,6 +422,7 @@ int RuntimeProfiler::SamplerWindowSize() {
 
 
 bool RuntimeProfilerRateLimiter::SuspendIfNecessary() {
+#ifdef ENABLE_LOGGING_AND_PROFILING
   static const int kNonJSTicksThreshold = 100;
   // We suspend the runtime profiler thread when not running
   // JavaScript. If the CPU profiler is active we must not do this
@@ -445,6 +440,7 @@ bool RuntimeProfilerRateLimiter::SuspendIfNecessary() {
       }
     }
   }
+#endif
   return false;
 }
 

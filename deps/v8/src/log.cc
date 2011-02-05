@@ -276,7 +276,8 @@ void SlidingStateWindow::AddState(StateTag state) {
 // Profiler implementation.
 //
 Profiler::Profiler()
-    : head_(0),
+    : Thread("v8:Profiler"),
+      head_(0),
       tail_(0),
       overflow_(false),
       buffer_semaphore_(OS::CreateSemaphore(0)),
@@ -709,6 +710,7 @@ void Logger::SetterCallbackEvent(String* name, Address entry_point) {
 }
 
 
+#ifdef ENABLE_LOGGING_AND_PROFILING
 static const char* ComputeMarker(Code* code) {
   switch (code->kind()) {
     case Code::FUNCTION: return code->optimizable() ? "~" : "";
@@ -716,6 +718,7 @@ static const char* ComputeMarker(Code* code) {
     default: return "";
   }
 }
+#endif
 
 
 void Logger::CodeCreateEvent(LogEventsAndTags tag,
@@ -1577,13 +1580,17 @@ bool Logger::Setup() {
 
 
 void Logger::EnsureTickerStarted() {
+#ifdef ENABLE_LOGGING_AND_PROFILING
   ASSERT(ticker_ != NULL);
   if (!ticker_->IsActive()) ticker_->Start();
+#endif
 }
 
 
 void Logger::EnsureTickerStopped() {
+#ifdef ENABLE_LOGGING_AND_PROFILING
   if (ticker_ != NULL && ticker_->IsActive()) ticker_->Stop();
+#endif
 }
 
 

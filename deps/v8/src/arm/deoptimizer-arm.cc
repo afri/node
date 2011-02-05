@@ -1,4 +1,4 @@
-// Copyright 2010 the V8 project authors. All rights reserved.
+// Copyright 2011 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -37,6 +37,14 @@ namespace internal {
 
 int Deoptimizer::table_entry_size_ = 16;
 
+
+int Deoptimizer::patch_size() {
+  const int kCallInstructionSizeInWords = 3;
+  return kCallInstructionSizeInWords * Assembler::kInstrSize;
+}
+
+
+
 void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
   AssertNoAllocation no_allocation;
 
@@ -51,12 +59,15 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
 
   // For each return after a safepoint insert an absolute call to the
   // corresponding deoptimization entry.
+  ASSERT(patch_size() % Assembler::kInstrSize == 0);
+  int call_size_in_words = patch_size() / Assembler::kInstrSize;
   unsigned last_pc_offset = 0;
   SafepointTable table(function->code());
   for (unsigned i = 0; i < table.length(); i++) {
     unsigned pc_offset = table.GetPcOffset(i);
-    int deoptimization_index = table.GetDeoptimizationIndex(i);
-    int gap_code_size = table.GetGapCodeSize(i);
+    SafepointEntry safepoint_entry = table.GetEntry(i);
+    int deoptimization_index = safepoint_entry.deoptimization_index();
+    int gap_code_size = safepoint_entry.gap_code_size();
     // Check that we did not shoot past next safepoint.
     // TODO(srdjan): How do we guarantee that safepoint code does not
     // overlap other safepoint patching code?
@@ -72,14 +83,13 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
 #endif
     last_pc_offset = pc_offset;
     if (deoptimization_index != Safepoint::kNoDeoptimizationIndex) {
-      const int kCallInstructionSizeInWords = 3;
-      CodePatcher patcher(code->instruction_start() + pc_offset + gap_code_size,
-                          kCallInstructionSizeInWords);
+      last_pc_offset += gap_code_size;
+      CodePatcher patcher(code->instruction_start() + last_pc_offset,
+                          call_size_in_words);
       Address deoptimization_entry = Deoptimizer::GetDeoptimizationEntry(
           deoptimization_index, Deoptimizer::LAZY);
       patcher.masm()->Call(deoptimization_entry, RelocInfo::NONE);
-      last_pc_offset +=
-          gap_code_size + kCallInstructionSizeInWords * Assembler::kInstrSize;
+      last_pc_offset += patch_size();
     }
   }
 
@@ -111,13 +121,16 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
 }
 
 
-void Deoptimizer::PatchStackCheckCode(RelocInfo* rinfo,
-                                      Code* replacement_code) {
+void Deoptimizer::PatchStackCheckCodeAt(Address pc_after,
+                                        Code* check_code,
+                                        Code* replacement_code) {
   UNIMPLEMENTED();
 }
 
 
-void Deoptimizer::RevertStackCheckCode(RelocInfo* rinfo, Code* check_code) {
+void Deoptimizer::RevertStackCheckCodeAt(Address pc_after,
+                                         Code* check_code,
+                                         Code* replacement_code) {
   UNIMPLEMENTED();
 }
 
@@ -366,7 +379,7 @@ void Deoptimizer::EntryGenerator::Generate() {
   // Copy core registers into FrameDescription::registers_[kNumRegisters].
   ASSERT(Register::kNumRegisters == kNumberOfRegisters);
   for (int i = 0; i < kNumberOfRegisters; i++) {
-    int offset = (i * kIntSize) + FrameDescription::registers_offset();
+    int offset = (i * kPointerSize) + FrameDescription::registers_offset();
     __ ldr(r2, MemOperand(sp, i * kPointerSize));
     __ str(r2, MemOperand(r1, offset));
   }
@@ -455,7 +468,7 @@ void Deoptimizer::EntryGenerator::Generate() {
 
   // Push the registers from the last output frame.
   for (int i = kNumberOfRegisters - 1; i >= 0; i--) {
-    int offset = (i * kIntSize) + FrameDescription::registers_offset();
+    int offset = (i * kPointerSize) + FrameDescription::registers_offset();
     __ ldr(r6, MemOperand(r2, offset));
     __ push(r6);
   }

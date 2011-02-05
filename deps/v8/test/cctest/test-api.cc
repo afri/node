@@ -814,6 +814,79 @@ THREADED_TEST(FunctionTemplate) {
 }
 
 
+static void* expected_ptr;
+static v8::Handle<v8::Value> callback(const v8::Arguments& args) {
+  void* ptr = v8::External::Unwrap(args.Data());
+  CHECK_EQ(expected_ptr, ptr);
+  return v8::Boolean::New(true);
+}
+
+
+static void TestExternalPointerWrapping() {
+  v8::HandleScope scope;
+  LocalContext env;
+
+  v8::Handle<v8::Value> data = v8::External::Wrap(expected_ptr);
+
+  v8::Handle<v8::Object> obj = v8::Object::New();
+  obj->Set(v8_str("func"),
+           v8::FunctionTemplate::New(callback, data)->GetFunction());
+  env->Global()->Set(v8_str("obj"), obj);
+
+  CHECK(CompileRun(
+        "function foo() {\n"
+        "  for (var i = 0; i < 13; i++) obj.func();\n"
+        "}\n"
+        "foo(), true")->BooleanValue());
+}
+
+
+THREADED_TEST(ExternalWrap) {
+  // Check heap allocated object.
+  int* ptr = new int;
+  expected_ptr = ptr;
+  TestExternalPointerWrapping();
+  delete ptr;
+
+  // Check stack allocated object.
+  int foo;
+  expected_ptr = &foo;
+  TestExternalPointerWrapping();
+
+  // Check not aligned addresses.
+  const int n = 100;
+  char* s = new char[n];
+  for (int i = 0; i < n; i++) {
+    expected_ptr = s + i;
+    TestExternalPointerWrapping();
+  }
+
+  delete[] s;
+
+  // Check several invalid addresses.
+  expected_ptr = reinterpret_cast<void*>(1);
+  TestExternalPointerWrapping();
+
+  expected_ptr = reinterpret_cast<void*>(0xdeadbeef);
+  TestExternalPointerWrapping();
+
+  expected_ptr = reinterpret_cast<void*>(0xdeadbeef + 1);
+  TestExternalPointerWrapping();
+
+#if defined(V8_HOST_ARCH_X64)
+  // Check a value with a leading 1 bit in x64 Smi encoding.
+  expected_ptr = reinterpret_cast<void*>(0x400000000);
+  TestExternalPointerWrapping();
+
+  expected_ptr = reinterpret_cast<void*>(0xdeadbeefdeadbeef);
+  TestExternalPointerWrapping();
+
+  expected_ptr = reinterpret_cast<void*>(0xdeadbeefdeadbeef + 1);
+  TestExternalPointerWrapping();
+#endif
+}
+
+
 THREADED_TEST(FindInstanceInPrototypeChain) {
   v8::HandleScope scope;
   LocalContext env;
@@ -2285,6 +2358,62 @@ TEST(TryCatchInTryFinally) {
                                    "} catch (e) {"
                                    "}");
   CHECK(result->IsTrue());
+}
+
+
+static void check_reference_error_message(
+    v8::Handle<v8::Message> message,
+    v8::Handle<v8::Value> data) {
+  const char* reference_error = "Uncaught ReferenceError: asdf is not defined";
+  CHECK(message->Get()->Equals(v8_str(reference_error)));
+}
+
+
+static v8::Handle<Value> Fail(const v8::Arguments& args) {
+  ApiTestFuzzer::Fuzz();
+  CHECK(false);
+  return v8::Undefined();
+}
+
+
+// Test that overwritten methods are not invoked on uncaught exception
+// formatting. However, they are invoked when performing normal error
+// string conversions.
+TEST(APIThrowMessageOverwrittenToString) {
+  v8::HandleScope scope;
+  v8::V8::AddMessageListener(check_reference_error_message);
+  Local<ObjectTemplate> templ = ObjectTemplate::New();
+  templ->Set(v8_str("fail"), v8::FunctionTemplate::New(Fail));
+  LocalContext context(NULL, templ);
+  CompileRun("asdf;");
+  CompileRun("var limit = {};"
+             "limit.valueOf = fail;"
+             "Error.stackTraceLimit = limit;");
+  CompileRun("asdf");
+  CompileRun("Array.prototype.pop = fail;");
+  CompileRun("Object.prototype.hasOwnProperty = fail;");
+  CompileRun("Object.prototype.toString = function f() { return 'Yikes'; }");
+  CompileRun("Number.prototype.toString = function f() { return 'Yikes'; }");
+  CompileRun("String.prototype.toString = function f() { return 'Yikes'; }");
+  CompileRun("ReferenceError.prototype.toString ="
+             "  function() { return 'Whoops' }");
+  CompileRun("asdf;");
+  CompileRun("ReferenceError.prototype.constructor.name = void 0;");
+  CompileRun("asdf;");
+  CompileRun("ReferenceError.prototype.constructor = void 0;");
+  CompileRun("asdf;");
+  CompileRun("ReferenceError.prototype.__proto__ = new Object();");
+  CompileRun("asdf;");
+  CompileRun("ReferenceError.prototype = new Object();");
+  CompileRun("asdf;");
+  v8::Handle<Value> string = CompileRun("try { asdf; } catch(e) { e + ''; }");
+  CHECK(string->Equals(v8_str("Whoops")));
+  CompileRun("ReferenceError.prototype.constructor = new Object();"
+             "ReferenceError.prototype.constructor.name = 1;"
+             "Number.prototype.toString = function() { return 'Whoops'; };"
+             "ReferenceError.prototype.toString = Object.prototype.toString;");
+  CompileRun("asdf;");
+  v8::V8::RemoveMessageListeners(check_message);
 }
 
 
@@ -4344,47 +4473,167 @@ THREADED_TEST(ObjectInstantiation) {
 }
 
 
+static int StrCmp16(uint16_t* a, uint16_t* b) {
+  while (true) {
+    if (*a == 0 && *b == 0) return 0;
+    if (*a != *b) return 0 + *a - *b;
+    a++;
+    b++;
+  }
+}
+
+
+static int StrNCmp16(uint16_t* a, uint16_t* b, int n) {
+  while (true) {
+    if (n-- == 0) return 0;
+    if (*a == 0 && *b == 0) return 0;
+    if (*a != *b) return 0 + *a - *b;
+    a++;
+    b++;
+  }
+}
+
+
 THREADED_TEST(StringWrite) {
   v8::HandleScope scope;
   v8::Handle<String> str = v8_str("abcde");
+  // abc<Icelandic eth><Unicode snowman>.
+  v8::Handle<String> str2 = v8_str("abc\303\260\342\230\203");
+
+  CHECK_EQ(5, str2->Length());
 
   char buf[100];
+  char utf8buf[100];
+  uint16_t wbuf[100];
   int len;
+  int charlen;
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, sizeof(utf8buf), &charlen);
+  CHECK_EQ(len, 9);
+  CHECK_EQ(charlen, 5);
+  CHECK_EQ(strcmp(utf8buf, "abc\303\260\342\230\203"), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 8, &charlen);
+  CHECK_EQ(len, 8);
+  CHECK_EQ(charlen, 5);
+  CHECK_EQ(strncmp(utf8buf, "abc\303\260\342\230\203\1", 9), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 7, &charlen);
+  CHECK_EQ(len, 5);
+  CHECK_EQ(charlen, 4);
+  CHECK_EQ(strncmp(utf8buf, "abc\303\260\1", 5), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 6, &charlen);
+  CHECK_EQ(len, 5);
+  CHECK_EQ(charlen, 4);
+  CHECK_EQ(strncmp(utf8buf, "abc\303\260\1", 5), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 5, &charlen);
+  CHECK_EQ(len, 5);
+  CHECK_EQ(charlen, 4);
+  CHECK_EQ(strncmp(utf8buf, "abc\303\260\1", 5), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 4, &charlen);
+  CHECK_EQ(len, 3);
+  CHECK_EQ(charlen, 3);
+  CHECK_EQ(strncmp(utf8buf, "abc\1", 4), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 3, &charlen);
+  CHECK_EQ(len, 3);
+  CHECK_EQ(charlen, 3);
+  CHECK_EQ(strncmp(utf8buf, "abc\1", 4), 0);
+
+  memset(utf8buf, 0x1, sizeof(utf8buf));
+  len = str2->WriteUtf8(utf8buf, 2, &charlen);
+  CHECK_EQ(len, 2);
+  CHECK_EQ(charlen, 2);
+  CHECK_EQ(strncmp(utf8buf, "ab\1", 3), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf);
   CHECK_EQ(len, 5);
-  CHECK_EQ(strncmp("abcde\0", buf, 6), 0);
+  len = str->Write(wbuf);
+  CHECK_EQ(len, 5);
+  CHECK_EQ(strcmp("abcde", buf), 0);
+  uint16_t answer1[] = {'a', 'b', 'c', 'd', 'e', '\0'};
+  CHECK_EQ(StrCmp16(answer1, wbuf), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 0, 4);
   CHECK_EQ(len, 4);
+  len = str->Write(wbuf, 0, 4);
+  CHECK_EQ(len, 4);
   CHECK_EQ(strncmp("abcd\1", buf, 5), 0);
+  uint16_t answer2[] = {'a', 'b', 'c', 'd', 0x101};
+  CHECK_EQ(StrNCmp16(answer2, wbuf, 5), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 0, 5);
   CHECK_EQ(len, 5);
+  len = str->Write(wbuf, 0, 5);
+  CHECK_EQ(len, 5);
   CHECK_EQ(strncmp("abcde\1", buf, 6), 0);
+  uint16_t answer3[] = {'a', 'b', 'c', 'd', 'e', 0x101};
+  CHECK_EQ(StrNCmp16(answer3, wbuf, 6), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 0, 6);
   CHECK_EQ(len, 5);
-  CHECK_EQ(strncmp("abcde\0", buf, 6), 0);
+  len = str->Write(wbuf, 0, 6);
+  CHECK_EQ(len, 5);
+  CHECK_EQ(strcmp("abcde", buf), 0);
+  uint16_t answer4[] = {'a', 'b', 'c', 'd', 'e', '\0'};
+  CHECK_EQ(StrCmp16(answer4, wbuf), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 4, -1);
   CHECK_EQ(len, 1);
-  CHECK_EQ(strncmp("e\0", buf, 2), 0);
+  len = str->Write(wbuf, 4, -1);
+  CHECK_EQ(len, 1);
+  CHECK_EQ(strcmp("e", buf), 0);
+  uint16_t answer5[] = {'e', '\0'};
+  CHECK_EQ(StrCmp16(answer5, wbuf), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 4, 6);
   CHECK_EQ(len, 1);
-  CHECK_EQ(strncmp("e\0", buf, 2), 0);
+  len = str->Write(wbuf, 4, 6);
+  CHECK_EQ(len, 1);
+  CHECK_EQ(strcmp("e", buf), 0);
+  CHECK_EQ(StrCmp16(answer5, wbuf), 0);
 
   memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
   len = str->WriteAscii(buf, 4, 1);
   CHECK_EQ(len, 1);
+  len = str->Write(wbuf, 4, 1);
+  CHECK_EQ(len, 1);
   CHECK_EQ(strncmp("e\1", buf, 2), 0);
+  uint16_t answer6[] = {'e', 0x101};
+  CHECK_EQ(StrNCmp16(answer6, wbuf, 2), 0);
+
+  memset(buf, 0x1, sizeof(buf));
+  memset(wbuf, 0x1, sizeof(wbuf));
+  len = str->WriteAscii(buf, 3, 1);
+  CHECK_EQ(len, 1);
+  len = str->Write(wbuf, 3, 1);
+  CHECK_EQ(len, 1);
+  CHECK_EQ(strncmp("d\1", buf, 2), 0);
+  uint16_t answer7[] = {'d', 0x101};
+  CHECK_EQ(StrNCmp16(answer7, wbuf, 2), 0);
 }
 
 
@@ -5141,37 +5390,45 @@ THREADED_TEST(AccessControl) {
   v8::Handle<Value> value;
 
   // Access blocked property
-  value = v8_compile("other.blocked_prop = 1")->Run();
-  value = v8_compile("other.blocked_prop")->Run();
+  value = CompileRun("other.blocked_prop = 1");
+  value = CompileRun("other.blocked_prop");
   CHECK(value->IsUndefined());
 
-  value = v8_compile("propertyIsEnumerable.call(other, 'blocked_prop')")->Run();
+  value = CompileRun(
+      "Object.getOwnPropertyDescriptor(other, 'blocked_prop').value");
+  CHECK(value->IsUndefined());
+
+  value = CompileRun("propertyIsEnumerable.call(other, 'blocked_prop')");
   CHECK(value->IsFalse());
 
   // Access accessible property
-  value = v8_compile("other.accessible_prop = 3")->Run();
+  value = CompileRun("other.accessible_prop = 3");
   CHECK(value->IsNumber());
   CHECK_EQ(3, value->Int32Value());
   CHECK_EQ(3, g_echo_value);
 
-  value = v8_compile("other.accessible_prop")->Run();
+  value = CompileRun("other.accessible_prop");
   CHECK(value->IsNumber());
   CHECK_EQ(3, value->Int32Value());
 
-  value =
-    v8_compile("propertyIsEnumerable.call(other, 'accessible_prop')")->Run();
+  value = CompileRun(
+      "Object.getOwnPropertyDescriptor(other, 'accessible_prop').value");
+  CHECK(value->IsNumber());
+  CHECK_EQ(3, value->Int32Value());
+
+  value = CompileRun("propertyIsEnumerable.call(other, 'accessible_prop')");
   CHECK(value->IsTrue());
 
   // Enumeration doesn't enumerate accessors from inaccessible objects in
   // the prototype chain even if the accessors are in themselves accessible.
-  Local<Value> result =
+  value =
       CompileRun("(function(){var obj = {'__proto__':other};"
                  "for (var p in obj)"
                  "   if (p == 'accessible_prop' || p == 'blocked_prop') {"
                  "     return false;"
                  "   }"
                  "return true;})()");
-  CHECK(result->IsTrue());
+  CHECK(value->IsTrue());
 
   context1->Exit();
   context0->Exit();
@@ -6016,7 +6273,7 @@ THREADED_TEST(FunctionDescriptorException) {
     "    var str = String(e);"
     "    if (str.indexOf('TypeError') == -1) return 1;"
     "    if (str.indexOf('[object Fun]') != -1) return 2;"
-    "    if (str.indexOf('#<a Fun>') == -1) return 3;"
+    "    if (str.indexOf('#<Fun>') == -1) return 3;"
     "    return 0;"
     "  }"
     "  return 4;"
@@ -10370,6 +10627,33 @@ static void ExternalArrayTestHelper(v8::ExternalArrayType array_type,
     CHECK_EQ(0, result->Int32Value());
     CHECK_EQ(0,
              i::Smi::cast(jsobj->GetElement(5)->ToObjectChecked())->value());
+
+    // Check truncation behavior of integral arrays.
+    const char* unsigned_data =
+        "var source_data = [0.6, 10.6];"
+        "var expected_results = [0, 10];";
+    const char* signed_data =
+        "var source_data = [0.6, 10.6, -0.6, -10.6];"
+        "var expected_results = [0, 10, 0, -10];";
+    bool is_unsigned =
+        (array_type == v8::kExternalUnsignedByteArray ||
+         array_type == v8::kExternalUnsignedShortArray ||
+         array_type == v8::kExternalUnsignedIntArray);
+
+    i::OS::SNPrintF(test_buf,
+                    "%s"
+                    "var all_passed = true;"
+                    "for (var i = 0; i < source_data.length; i++) {"
+                    "  for (var j = 0; j < 8; j++) {"
+                    "    ext_array[j] = source_data[i];"
+                    "  }"
+                    "  all_passed = all_passed &&"
+                    "               (ext_array[5] == expected_results[i]);"
+                    "}"
+                    "all_passed;",
+                    (is_unsigned ? unsigned_data : signed_data));
+    result = CompileRun(test_buf.start());
+    CHECK_EQ(true, result->BooleanValue());
   }
 
   result = CompileRun("ext_array[3] = 33;"

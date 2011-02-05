@@ -627,10 +627,10 @@ Result CodeGenerator::StoreArgumentsObject(bool initial) {
 
   Comment cmnt(masm_, "[ store arguments object");
   if (mode == LAZY_ARGUMENTS_ALLOCATION && initial) {
-    // When using lazy arguments allocation, we store the hole value
+    // When using lazy arguments allocation, we store the arguments marker value
     // as a sentinel indicating that the arguments object hasn't been
     // allocated yet.
-    frame_->Push(Factory::the_hole_value());
+    frame_->Push(Factory::arguments_marker());
   } else {
     ArgumentsAccessStub stub(ArgumentsAccessStub::NEW_OBJECT);
     frame_->PushFunction();
@@ -655,9 +655,9 @@ Result CodeGenerator::StoreArgumentsObject(bool initial) {
     if (probe.is_constant()) {
       // We have to skip updating the arguments object if it has
       // been assigned a proper value.
-      skip_arguments = !probe.handle()->IsTheHole();
+      skip_arguments = !probe.handle()->IsArgumentsMarker();
     } else {
-      __ CompareRoot(probe.reg(), Heap::kTheHoleValueRootIndex);
+      __ CompareRoot(probe.reg(), Heap::kArgumentsMarkerRootIndex);
       probe.Unuse();
       done.Branch(not_equal);
     }
@@ -2516,9 +2516,9 @@ void CodeGenerator::CallApplyLazy(Expression* applicand,
     Label slow, done;
     bool try_lazy = true;
     if (probe.is_constant()) {
-      try_lazy = probe.handle()->IsTheHole();
+      try_lazy = probe.handle()->IsArgumentsMarker();
     } else {
-      __ CompareRoot(probe.reg(), Heap::kTheHoleValueRootIndex);
+      __ CompareRoot(probe.reg(), Heap::kArgumentsMarkerRootIndex);
       probe.Unuse();
       __ j(not_equal, &slow);
     }
@@ -4417,7 +4417,7 @@ void CodeGenerator::LoadFromSlotCheckForArguments(Slot* slot,
   // If the loaded value is a constant, we know if the arguments
   // object has been lazily loaded yet.
   if (value.is_constant()) {
-    if (value.handle()->IsTheHole()) {
+    if (value.handle()->IsArgumentsMarker()) {
       Result arguments = StoreArgumentsObject(false);
       frame_->Push(&arguments);
     } else {
@@ -4430,7 +4430,7 @@ void CodeGenerator::LoadFromSlotCheckForArguments(Slot* slot,
   // indicates that we haven't loaded the arguments object yet, we
   // need to do it now.
   JumpTarget exit;
-  __ CompareRoot(value.reg(), Heap::kTheHoleValueRootIndex);
+  __ CompareRoot(value.reg(), Heap::kArgumentsMarkerRootIndex);
   frame_->Push(&value);
   exit.Branch(not_equal);
   Result arguments = StoreArgumentsObject(false);
@@ -6782,6 +6782,13 @@ void CodeGenerator::GenerateSwapElements(ZoneList<Expression*>* args) {
   Condition both_smi = masm()->CheckBothSmi(index1.reg(), index2.reg());
   deferred->Branch(NegateCondition(both_smi));
 
+  // Check that both indices are valid.
+  __ movq(tmp2.reg(), FieldOperand(object.reg(), JSArray::kLengthOffset));
+  __ SmiCompare(tmp2.reg(), index1.reg());
+  deferred->Branch(below_equal);
+  __ SmiCompare(tmp2.reg(), index2.reg());
+  deferred->Branch(below_equal);
+
   // Bring addresses into index1 and index2.
   __ SmiToInteger32(index1.reg(), index1.reg());
   __ lea(index1.reg(), FieldOperand(tmp1.reg(),
@@ -6806,12 +6813,8 @@ void CodeGenerator::GenerateSwapElements(ZoneList<Expression*>* args) {
   // (or them and test against Smi mask.)
 
   __ movq(tmp2.reg(), tmp1.reg());
-  RecordWriteStub recordWrite1(tmp2.reg(), index1.reg(), object.reg());
-  __ CallStub(&recordWrite1);
-
-  RecordWriteStub recordWrite2(tmp1.reg(), index2.reg(), object.reg());
-  __ CallStub(&recordWrite2);
-
+  __ RecordWriteHelper(tmp1.reg(), index1.reg(), object.reg());
+  __ RecordWriteHelper(tmp2.reg(), index2.reg(), object.reg());
   __ bind(&done);
 
   deferred->BindExit();
@@ -6966,10 +6969,12 @@ void CodeGenerator::GenerateMathPow(ZoneList<Expression*>* args) {
   __ j(not_equal, &not_minus_half);
 
   // Calculates reciprocal of square root.
-  // Note that 1/sqrt(x) = sqrt(1/x))
-  __ divsd(xmm3, xmm0);
-  __ movsd(xmm1, xmm3);
+  // sqrtsd returns -0 when input is -0.  ECMA spec requires +0.
+  __ xorpd(xmm1, xmm1);
+  __ addsd(xmm1, xmm0);
   __ sqrtsd(xmm1, xmm1);
+  __ divsd(xmm3, xmm1);
+  __ movsd(xmm1, xmm3);
   __ jmp(&allocate_return);
 
   // Test for 0.5.
@@ -6982,7 +6987,9 @@ void CodeGenerator::GenerateMathPow(ZoneList<Expression*>* args) {
   call_runtime.Branch(not_equal);
 
   // Calculates square root.
-  __ movsd(xmm1, xmm0);
+  // sqrtsd returns -0 when input is -0.  ECMA spec requires +0.
+  __ xorpd(xmm1, xmm1);
+  __ addsd(xmm1, xmm0);
   __ sqrtsd(xmm1, xmm1);
 
   JumpTarget done;
@@ -7232,19 +7239,13 @@ void CodeGenerator::VisitUnaryOperation(UnaryOperation* node) {
         return;
 
       } else if (slot != NULL && slot->type() == Slot::LOOKUP) {
-        // Call the runtime to look up the context holding the named
+        // Call the runtime to delete from the context holding the named
         // variable.  Sync the virtual frame eagerly so we can push the
         // arguments directly into place.
         frame_->SyncRange(0, frame_->element_count() - 1);
         frame_->EmitPush(rsi);
         frame_->EmitPush(variable->name());
-        Result context = frame_->CallRuntime(Runtime::kLookupContext, 2);
-        ASSERT(context.is_register());
-        frame_->EmitPush(context.reg());
-        context.Unuse();
-        frame_->EmitPush(variable->name());
-        Result answer = frame_->InvokeBuiltin(Builtins::DELETE,
-                                              CALL_FUNCTION, 2);
+        Result answer = frame_->CallRuntime(Runtime::kDeleteContextSlot, 2);
         frame_->Push(&answer);
         return;
       }
@@ -7867,7 +7868,7 @@ void CodeGenerator::VisitCompareOperation(CompareOperation* node) {
     case Token::INSTANCEOF: {
       Load(left);
       Load(right);
-      InstanceofStub stub;
+      InstanceofStub stub(InstanceofStub::kNoFlags);
       Result answer = frame_->CallStub(&stub, 2);
       answer.ToRegister();
       __ testq(answer.reg(), answer.reg());
@@ -8804,11 +8805,6 @@ ModuloFunction CreateModuloFunction() {
 
 
 #undef __
-
-void RecordWriteStub::Generate(MacroAssembler* masm) {
-  masm->RecordWriteHelper(object_, addr_, scratch_);
-  masm->ret(0);
-}
 
 } }  // namespace v8::internal
 

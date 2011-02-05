@@ -1478,11 +1478,11 @@ v8::Handle<Value> Message::GetScriptResourceName() const {
   }
   ENTER_V8;
   HandleScope scope;
-  i::Handle<i::JSObject> obj =
-      i::Handle<i::JSObject>::cast(Utils::OpenHandle(this));
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(Utils::OpenHandle(this));
   // Return this.script.name.
   i::Handle<i::JSValue> script =
-      i::Handle<i::JSValue>::cast(GetProperty(obj, "script"));
+      i::Handle<i::JSValue>::cast(i::Handle<i::Object>(message->script()));
   i::Handle<i::Object> resource_name(i::Script::cast(script->value())->name());
   return scope.Close(Utils::ToLocal(resource_name));
 }
@@ -1494,11 +1494,11 @@ v8::Handle<Value> Message::GetScriptData() const {
   }
   ENTER_V8;
   HandleScope scope;
-  i::Handle<i::JSObject> obj =
-      i::Handle<i::JSObject>::cast(Utils::OpenHandle(this));
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(Utils::OpenHandle(this));
   // Return this.script.data.
   i::Handle<i::JSValue> script =
-      i::Handle<i::JSValue>::cast(GetProperty(obj, "script"));
+      i::Handle<i::JSValue>::cast(i::Handle<i::Object>(message->script()));
   i::Handle<i::Object> data(i::Script::cast(script->value())->data());
   return scope.Close(Utils::ToLocal(data));
 }
@@ -1510,9 +1510,9 @@ v8::Handle<v8::StackTrace> Message::GetStackTrace() const {
   }
   ENTER_V8;
   HandleScope scope;
-  i::Handle<i::JSObject> obj =
-      i::Handle<i::JSObject>::cast(Utils::OpenHandle(this));
-  i::Handle<i::Object> stackFramesObj = GetProperty(obj, "stackFrames");
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(Utils::OpenHandle(this));
+  i::Handle<i::Object> stackFramesObj(message->stack_frames());
   if (!stackFramesObj->IsJSArray()) return v8::Handle<v8::StackTrace>();
   i::Handle<i::JSArray> stackTrace =
       i::Handle<i::JSArray>::cast(stackFramesObj);
@@ -1552,6 +1552,7 @@ int Message::GetLineNumber() const {
   ON_BAILOUT("v8::Message::GetLineNumber()", return kNoLineNumberInfo);
   ENTER_V8;
   HandleScope scope;
+
   EXCEPTION_PREAMBLE();
   i::Handle<i::Object> result = CallV8HeapFunction("GetLineNumber",
                                                    Utils::OpenHandle(this),
@@ -1565,9 +1566,9 @@ int Message::GetStartPosition() const {
   if (IsDeadCheck("v8::Message::GetStartPosition()")) return 0;
   ENTER_V8;
   HandleScope scope;
-
-  i::Handle<i::JSObject> data_obj = Utils::OpenHandle(this);
-  return static_cast<int>(GetProperty(data_obj, "startPos")->Number());
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(Utils::OpenHandle(this));
+  return message->start_position();
 }
 
 
@@ -1575,8 +1576,9 @@ int Message::GetEndPosition() const {
   if (IsDeadCheck("v8::Message::GetEndPosition()")) return 0;
   ENTER_V8;
   HandleScope scope;
-  i::Handle<i::JSObject> data_obj = Utils::OpenHandle(this);
-  return static_cast<int>(GetProperty(data_obj, "endPos")->Number());
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(Utils::OpenHandle(this));
+  return message->end_position();
 }
 
 
@@ -1606,8 +1608,10 @@ int Message::GetEndColumn() const {
       data_obj,
       &has_pending_exception);
   EXCEPTION_BAILOUT_CHECK(0);
-  int start = static_cast<int>(GetProperty(data_obj, "startPos")->Number());
-  int end = static_cast<int>(GetProperty(data_obj, "endPos")->Number());
+  i::Handle<i::JSMessageObject> message =
+      i::Handle<i::JSMessageObject>::cast(data_obj);
+  int start = message->start_position();
+  int end = message->end_position();
   return static_cast<int>(start_col_obj->Number()) + (end - start);
 }
 
@@ -3156,14 +3160,15 @@ int String::Write(uint16_t* buffer,
     // using StringInputBuffer or Get(i) to access the characters.
     str->TryFlatten();
   }
-  int end = length+start;
-  if ( (length == -1) || (length > str->length() - start) )
+  int end = start + length;
+  if ((length == -1) || (length > str->length() - start) )
     end = str->length();
   if (end < 0) return 0;
   i::String::WriteToFlat(*str, buffer, start, end);
-  if (length == -1 || end-start < length)
-    buffer[end] = '\0';
-  return end;
+  if (length == -1 || end - start < length) {
+    buffer[end - start] = '\0';
+  }
+  return end - start;
 }
 
 
@@ -3294,18 +3299,35 @@ void v8::Object::SetInternalField(int index, v8::Handle<Value> value) {
 }
 
 
+static bool CanBeEncodedAsSmi(void* ptr) {
+  const uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
+  return ((address & i::kEncodablePointerMask) == 0);
+}
+
+
+static i::Smi* EncodeAsSmi(void* ptr) {
+  ASSERT(CanBeEncodedAsSmi(ptr));
+  const uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
+  i::Smi* result = reinterpret_cast<i::Smi*>(address << i::kPointerToSmiShift);
+  ASSERT(i::Internals::HasSmiTag(result));
+  ASSERT_EQ(result, i::Smi::FromInt(result->value()));
+  ASSERT_EQ(ptr, i::Internals::GetExternalPointerFromSmi(result));
+  return result;
+}
+
+
 void v8::Object::SetPointerInInternalField(int index, void* value) {
   ENTER_V8;
-  i::Object* as_object = reinterpret_cast<i::Object*>(value);
-  if (as_object->IsSmi()) {
-    Utils::OpenHandle(this)->SetInternalField(index, as_object);
-    return;
+  if (CanBeEncodedAsSmi(value)) {
+    Utils::OpenHandle(this)->SetInternalField(index, EncodeAsSmi(value));
+  } else {
+    HandleScope scope;
+    i::Handle<i::Proxy> proxy =
+        i::Factory::NewProxy(reinterpret_cast<i::Address>(value), i::TENURED);
+    if (!proxy.is_null())
+        Utils::OpenHandle(this)->SetInternalField(index, *proxy);
   }
-  HandleScope scope;
-  i::Handle<i::Proxy> proxy =
-      i::Factory::NewProxy(reinterpret_cast<i::Address>(value), i::TENURED);
-  if (!proxy.is_null())
-      Utils::OpenHandle(this)->SetInternalField(index, *proxy);
+  ASSERT_EQ(value, GetPointerFromInternalField(index));
 }
 
 
@@ -3327,7 +3349,8 @@ bool v8::V8::Dispose() {
 
 HeapStatistics::HeapStatistics(): total_heap_size_(0),
                                   total_heap_size_executable_(0),
-                                  used_heap_size_(0) { }
+                                  used_heap_size_(0),
+                                  heap_size_limit_(0) { }
 
 
 void v8::V8::GetHeapStatistics(HeapStatistics* heap_statistics) {
@@ -3335,6 +3358,7 @@ void v8::V8::GetHeapStatistics(HeapStatistics* heap_statistics) {
   heap_statistics->set_total_heap_size_executable(
       i::Heap::CommittedMemoryExecutable());
   heap_statistics->set_used_heap_size(i::Heap::SizeOfObjects());
+  heap_statistics->set_heap_size_limit(i::Heap::MaxReserved());
 }
 
 
@@ -3588,11 +3612,13 @@ Local<Value> v8::External::Wrap(void* data) {
   LOG_API("External::Wrap");
   EnsureInitialized("v8::External::Wrap()");
   ENTER_V8;
-  i::Object* as_object = reinterpret_cast<i::Object*>(data);
-  if (as_object->IsSmi()) {
-    return Utils::ToLocal(i::Handle<i::Object>(as_object));
-  }
-  return ExternalNewImpl(data);
+
+  v8::Local<v8::Value> result = CanBeEncodedAsSmi(data)
+      ? Utils::ToLocal(i::Handle<i::Object>(EncodeAsSmi(data)))
+      : v8::Local<v8::Value>(ExternalNewImpl(data));
+
+  ASSERT_EQ(data, Unwrap(result));
+  return result;
 }
 
 
@@ -3600,7 +3626,7 @@ void* v8::Object::SlowGetPointerFromInternalField(int index) {
   i::Handle<i::JSObject> obj = Utils::OpenHandle(this);
   i::Object* value = obj->GetInternalField(index);
   if (value->IsSmi()) {
-    return value;
+    return i::Internals::GetExternalPointerFromSmi(value);
   } else if (value->IsProxy()) {
     return reinterpret_cast<void*>(i::Proxy::cast(value)->proxy());
   } else {
@@ -3614,8 +3640,7 @@ void* v8::External::FullUnwrap(v8::Handle<v8::Value> wrapper) {
   i::Handle<i::Object> obj = Utils::OpenHandle(*wrapper);
   void* result;
   if (obj->IsSmi()) {
-    // The external value was an aligned pointer.
-    result = *obj;
+    result = i::Internals::GetExternalPointerFromSmi(*obj);
   } else if (obj->IsProxy()) {
     result = ExternalValueImpl(obj);
   } else {
@@ -3827,6 +3852,35 @@ double v8::Date::NumberValue() const {
   i::Handle<i::Object> obj = Utils::OpenHandle(this);
   i::Handle<i::JSValue> jsvalue = i::Handle<i::JSValue>::cast(obj);
   return jsvalue->value()->Number();
+}
+
+
+void v8::Date::DateTimeConfigurationChangeNotification() {
+  ON_BAILOUT("v8::Date::DateTimeConfigurationChangeNotification()", return);
+  LOG_API("Date::DateTimeConfigurationChangeNotification");
+  ENTER_V8;
+
+  HandleScope scope;
+
+  // Get the function ResetDateCache (defined in date-delay.js).
+  i::Handle<i::String> func_name_str =
+      i::Factory::LookupAsciiSymbol("ResetDateCache");
+  i::MaybeObject* result = i::Top::builtins()->GetProperty(*func_name_str);
+  i::Object* object_func;
+  if (!result->ToObject(&object_func)) {
+    return;
+  }
+
+  if (object_func->IsJSFunction()) {
+    i::Handle<i::JSFunction> func =
+        i::Handle<i::JSFunction>(i::JSFunction::cast(object_func));
+
+    // Call ResetDateCache(0 but expect no exceptions:
+    bool caught_exception = false;
+    i::Handle<i::Object> result =
+        i::Execution::TryCall(func, i::Top::builtins(), 0, NULL,
+        &caught_exception);
+  }
 }
 
 
@@ -5007,6 +5061,7 @@ void Testing::SetStressRunType(Testing::StressType type) {
 }
 
 int Testing::GetStressRuns() {
+  if (internal::FLAG_stress_runs != 0) return internal::FLAG_stress_runs;
 #ifdef DEBUG
   // In debug mode the code runs much slower so stressing will only make two
   // runs.

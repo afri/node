@@ -99,6 +99,14 @@ Handle<String> Factory::LookupSymbol(Vector<const char> string) {
   CALL_HEAP_FUNCTION(Heap::LookupSymbol(string), String);
 }
 
+Handle<String> Factory::LookupAsciiSymbol(Vector<const char> string) {
+  CALL_HEAP_FUNCTION(Heap::LookupAsciiSymbol(string), String);
+}
+
+Handle<String> Factory::LookupTwoByteSymbol(Vector<const uc16> string) {
+  CALL_HEAP_FUNCTION(Heap::LookupTwoByteSymbol(string), String);
+}
+
 
 Handle<String> Factory::NewStringFromAscii(Vector<const char> string,
                                            PretenureFlag pretenure) {
@@ -746,6 +754,24 @@ Handle<SharedFunctionInfo> Factory::NewSharedFunctionInfo(
   return shared;
 }
 
+
+Handle<JSMessageObject> Factory::NewJSMessageObject(
+    Handle<String> type,
+    Handle<JSArray> arguments,
+    int start_position,
+    int end_position,
+    Handle<Object> script,
+    Handle<Object> stack_trace,
+    Handle<Object> stack_frames) {
+  CALL_HEAP_FUNCTION(Heap::AllocateJSMessageObject(*type,
+                                                   *arguments,
+                                                   start_position,
+                                                   end_position,
+                                                   *script,
+                                                   *stack_trace,
+                                                   *stack_frames),
+                     JSMessageObject);
+}
 
 Handle<SharedFunctionInfo> Factory::NewSharedFunctionInfo(Handle<String> name) {
   CALL_HEAP_FUNCTION(Heap::AllocateSharedFunctionInfo(*name),

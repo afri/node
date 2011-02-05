@@ -70,10 +70,11 @@ class MacroAssembler: public Assembler {
 
   // Check if object is in new space.
   // scratch can be object itself, but it will be clobbered.
+  template <typename LabelType>
   void InNewSpace(Register object,
                   Register scratch,
                   Condition cc,  // equal for new space, not_equal otherwise.
-                  Label* branch);
+                  LabelType* branch);
 
   // For page containing |object| mark region covering [object+offset]
   // dirty. |object| is the object being stored into, |value| is the
@@ -385,22 +386,13 @@ class MacroAssembler: public Assembler {
                                Register scratch2,
                                Label* gc_required);
 
-  // All registers must be distinct.  Only current_string needs valid contents
-  // on entry.  All registers may be invalid on exit.  result_operand is
-  // unchanged, padding_chars is updated correctly.
-  // The top of new space must contain a sequential ascii string with
-  // padding_chars bytes free in its top word.  The sequential ascii string
-  // current_string is concatenated to it, allocating the necessary amount
-  // of new memory.
-  void AppendStringToTopOfNewSpace(
-      Register current_string,  // Tagged pointer to string to copy.
-      Register current_string_length,
-      Register result_pos,
-      Register scratch,
-      Register new_padding_chars,
-      Operand operand_result,
-      Operand operand_padding_chars,
-      Label* bailout);
+  // Copy memory, byte-by-byte, from source to destination.  Not optimized for
+  // long or aligned copies.
+  // The contents of index and scratch are destroyed.
+  void CopyBytes(Register source,
+                 Register destination,
+                 Register length,
+                 Register scratch);
 
   // ---------------------------------------------------------------------------
   // Support functions.
@@ -656,6 +648,31 @@ class MacroAssembler: public Assembler {
                                                     Register scratch,
                                                     bool gc_allowed);
 };
+
+
+template <typename LabelType>
+void MacroAssembler::InNewSpace(Register object,
+                                Register scratch,
+                                Condition cc,
+                                LabelType* branch) {
+  ASSERT(cc == equal || cc == not_equal);
+  if (Serializer::enabled()) {
+    // Can't do arithmetic on external references if it might get serialized.
+    mov(scratch, Operand(object));
+    // The mask isn't really an address.  We load it as an external reference in
+    // case the size of the new space is different between the snapshot maker
+    // and the running system.
+    and_(Operand(scratch), Immediate(ExternalReference::new_space_mask()));
+    cmp(Operand(scratch), Immediate(ExternalReference::new_space_start()));
+    j(cc, branch);
+  } else {
+    int32_t new_space_start = reinterpret_cast<int32_t>(
+        ExternalReference::new_space_start().address());
+    lea(scratch, Operand(object, -new_space_start));
+    and_(scratch, Heap::NewSpaceMask());
+    j(cc, branch);
+  }
+}
 
 
 // The code patcher is used to patch (typically) small parts of code e.g. for
