@@ -11,7 +11,7 @@ Module._extensions['.sjs'] = function (module, filename) {
   content = content.replace(/^\#\!.*/, '');
   // sjs -> js
   content = global.__oni_rt.c1.compile(content, { filename: filename });
-  return Module.prototype._compile(content, filename);
+  return module._compile(content, filename);
 };
 
 exports.runEval = function() {
